@@ -1,0 +1,14 @@
+# Personal runtime data: captures, active profiles, input spots, app-window browser profile
+data/
+logs/
+
+# Build output
+tools/bin/
+
+# Third-party downloads (fetched by tools/get-interception.ps1)
+vendor/
+
+# Product photos used for tracing layouts (not ours to redistribute)
+docs/reference/
+
+*.tmp

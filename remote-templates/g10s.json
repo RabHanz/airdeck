@@ -1,0 +1,60 @@
+{
+  "id": "g10s",
+  "name": "G10S",
+  "order": 2,
+  "vid": "1915",
+  "pid": "1025",
+  "note": "2.4G Composite receiver - mic shows up as MIC-Wireless Device. Layout traced from product photos",
+  "width": 265,
+  "height": 720,
+  "topCorner": 130,
+  "bottomCorner": 130,
+  "dots": [ { "x": 160, "y": 58 }, { "x": 178, "y": 58 }, { "x": 196, "y": 58 } ],
+  "buttons": [
+    { "id": "power",      "label": "Power",      "glyph": "E7E8", "shape": "rrect", "x": 95,  "y": 62,  "w": 80, "h": 46, "r": 14 },
+    { "id": "play_pause", "label": "Play/Pause", "glyph": "E768", "shape": "rrect", "x": 86,  "y": 118, "w": 92, "h": 44, "r": 10 },
+    { "id": "mouse",      "label": "Mouse",      "glyph": "E962", "shape": "rrect", "x": 180, "y": 118, "w": 92, "h": 44, "r": 10 },
+
+    { "id": "up",    "label": "Up",    "glyph": "E70E", "shape": "dpad_up",    "x": 133, "y": 240, "r": 100, "r2": 48 },
+    { "id": "right", "label": "Right", "glyph": "E76C", "shape": "dpad_right", "x": 133, "y": 240, "r": 100, "r2": 48 },
+    { "id": "down",  "label": "Down",  "glyph": "E70D", "shape": "dpad_down",  "x": 133, "y": 240, "r": 100, "r2": 48 },
+    { "id": "left",  "label": "Left",  "glyph": "E76B", "shape": "dpad_left",  "x": 133, "y": 240, "r": 100, "r2": 48 },
+    { "id": "ok",    "label": "OK",    "text": "OK",    "shape": "circle",     "x": 133, "y": 240, "r": 44 },
+
+    { "id": "home_back", "label": "Home / Back", "glyph": "E80F", "shape": "rrect", "x": 80,  "y": 370, "w": 100, "h": 46, "r": 10 },
+    { "id": "menu",      "label": "Menu",        "glyph": "E700", "shape": "rrect", "x": 186, "y": 370, "w": 100, "h": 46, "r": 10 },
+
+    { "id": "page_up",   "label": "Page up",   "glyph": "E70E", "shape": "rrect", "x": 58,  "y": 436, "w": 62, "h": 60, "r": 10 },
+    { "id": "page_down", "label": "Page down", "glyph": "E70D", "shape": "rrect", "x": 58,  "y": 502, "w": 62, "h": 60, "r": 10 },
+    { "id": "mic",       "label": "Voice",     "glyph": "E720", "shape": "circle", "x": 133, "y": 469, "r": 34 },
+    { "id": "vol_up",    "label": "Vol +",     "text": "+",     "shape": "rrect", "x": 208, "y": 436, "w": 62, "h": 60, "r": 10 },
+    { "id": "vol_down",  "label": "Vol -",     "text": "-",     "shape": "rrect", "x": 208, "y": 502, "w": 62, "h": 60, "r": 10 },
+
+    { "id": "del",  "label": "DEL",  "text": "DEL",  "shape": "rrect", "x": 88,  "y": 575, "w": 88, "h": 46, "r": 12 },
+    { "id": "mute", "label": "Mute", "glyph": "E74F", "shape": "rrect", "x": 178, "y": 575, "w": 88, "h": 46, "r": 12 }
+  ],
+  "steps": [
+    { "id": "mic_hold",  "button": "mic", "title": "Voice (mic) - hold 3 seconds", "holdMs": 3000,
+      "instruction": "The red microphone key in the middle, between PAGE and VOL. Press and HOLD it, count 1-2-3, then release." },
+    { "id": "mic_tap",   "button": "mic", "title": "Voice (mic) - quick tap", "holdMs": 0,
+      "instruction": "Tap the same microphone key once, quickly." },
+    { "id": "home_back", "button": "home_back", "title": "Home / Back", "holdMs": 2000,
+      "instruction": "The key under the ring on the left, with the house and return-arrow icons. Hold ~2 seconds, then release." },
+    { "id": "play_pause","button": "play_pause","title": "Play / Pause", "holdMs": 1000, "instruction": "Second row, left. Hold ~1 second, then release." },
+    { "id": "mouse",     "button": "mouse",     "title": "Mouse on/off", "holdMs": 1000, "instruction": "Second row, right. Hold ~1 second, release (press again if the pointer stops)." },
+    { "id": "up",        "button": "up",        "title": "Up",        "holdMs": 1000, "instruction": "Hold ~1 second, then release." },
+    { "id": "down",      "button": "down",      "title": "Down",      "holdMs": 1000, "instruction": "Hold ~1 second, then release." },
+    { "id": "left",      "button": "left",      "title": "Left",      "holdMs": 1000, "instruction": "Hold ~1 second, then release." },
+    { "id": "right",     "button": "right",     "title": "Right",     "holdMs": 1000, "instruction": "Hold ~1 second, then release." },
+    { "id": "ok",        "button": "ok",        "title": "OK",        "holdMs": 1000, "instruction": "The centre of the orange ring. Hold ~1 second, then release." },
+    { "id": "menu",      "button": "menu",      "title": "Menu",      "holdMs": 1000, "instruction": "The key under the ring on the right (three lines). Hold ~1 second, then release." },
+    { "id": "page_up",   "button": "page_up",   "title": "PAGE up",   "holdMs": 1000, "instruction": "Top half of the PAGE key. Hold ~1 second, then release." },
+    { "id": "page_down", "button": "page_down", "title": "PAGE down", "holdMs": 1000, "instruction": "Bottom half of the PAGE key. Hold ~1 second, then release." },
+    { "id": "vol_up",    "button": "vol_up",    "title": "VOL +",     "holdMs": 1000, "instruction": "Top half of the VOL key. Hold ~1 second, then release." },
+    { "id": "vol_down",  "button": "vol_down",  "title": "VOL -",     "holdMs": 1000, "instruction": "Bottom half of the VOL key. Hold ~1 second, then release." },
+    { "id": "del",       "button": "del",       "title": "DEL",       "holdMs": 1000, "instruction": "Bottom-left key. Hold ~1 second, then release." },
+    { "id": "mute",      "button": "mute",      "title": "Mute",      "holdMs": 1000, "instruction": "Bottom-right key. Hold ~1 second, release (press again afterwards to unmute)." },
+    { "id": "power",     "button": "power",     "title": "Power (optional)", "holdMs": 0, "warn": true,
+      "instruction": "WARNING: this may put the PC to sleep or open the shutdown menu. Press Space to skip unless you want to map it." }
+  ]
+}

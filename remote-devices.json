@@ -1,0 +1,461 @@
+﻿{
+    "generated_at":  "2026-09-23T01:20:49",
+    "generated_from":  "data/remote-capture.json",
+    "remotes":  {
+                    "g20s":  {
+                                 "name":  "G20S",
+                                 "vid":  "0x4842",
+                                 "pid":  "0x0001",
+                                 "keyboard_interface":  "MI_02\u0026COL01",
+                                 "mouse_interface":  "MI_03",
+                                 "consumer_interface":  "MI_02\u0026COL02",
+                                 "vendor_interface":  "MI_04",
+                                 "voice_usage":  "0x00CF",
+                                 "voice_semantics":  "instant (tap only - use as a toggle)",
+                                 "buttons":  {
+                                                 "mic":  {
+                                                             "source":  "consumer",
+                                                             "page":  "0x000C",
+                                                             "usage":  "0x00CF",
+                                                             "interface":  "MI_02\u0026COL02",
+                                                             "semantics":  "instant"
+                                                         },
+                                                 "home":  {
+                                                              "source":  "consumer",
+                                                              "page":  "0x000C",
+                                                              "usage":  "0x0223",
+                                                              "interface":  "MI_02\u0026COL02",
+                                                              "semantics":  "instant"
+                                                          },
+                                                 "mute":  {
+                                                              "source":  "none",
+                                                              "status":  "no_event"
+                                                          },
+                                                 "page_up":  {
+                                                                 "source":  "keyboard",
+                                                                 "vk":  "0x21",
+                                                                 "key":  "PageUp",
+                                                                 "sc":  "E0 49",
+                                                                 "interface":  "MI_02\u0026COL01",
+                                                                 "semantics":  "instant"
+                                                             },
+                                                 "mouse":  {
+                                                               "source":  "none",
+                                                               "status":  "no_event"
+                                                           },
+                                                 "page_down":  {
+                                                                   "source":  "keyboard",
+                                                                   "vk":  "0x22",
+                                                                   "key":  "Next",
+                                                                   "sc":  "E0 51",
+                                                                   "interface":  "MI_02\u0026COL01",
+                                                                   "semantics":  "short"
+                                                               },
+                                                 "up":  {
+                                                            "source":  "keyboard",
+                                                            "vk":  "0x26",
+                                                            "key":  "Up",
+                                                            "sc":  "E0 48",
+                                                            "interface":  "MI_02\u0026COL01",
+                                                            "semantics":  "short"
+                                                        },
+                                                 "down":  {
+                                                              "source":  "keyboard",
+                                                              "vk":  "0x28",
+                                                              "key":  "Down",
+                                                              "sc":  "E0 50",
+                                                              "interface":  "MI_02\u0026COL01",
+                                                              "semantics":  "short"
+                                                          },
+                                                 "left":  {
+                                                              "source":  "keyboard",
+                                                              "vk":  "0x25",
+                                                              "key":  "Left",
+                                                              "sc":  "E0 4B",
+                                                              "interface":  "MI_02\u0026COL01",
+                                                              "semantics":  "short"
+                                                          },
+                                                 "right":  {
+                                                               "source":  "keyboard",
+                                                               "vk":  "0x27",
+                                                               "key":  "Right",
+                                                               "sc":  "E0 4D",
+                                                               "interface":  "MI_02\u0026COL01",
+                                                               "semantics":  "short"
+                                                           },
+                                                 "ok":  {
+                                                            "source":  "consumer",
+                                                            "page":  "0x000C",
+                                                            "usage":  "0x0041",
+                                                            "interface":  "MI_02\u0026COL02",
+                                                            "semantics":  "short"
+                                                        },
+                                                 "back":  {
+                                                              "source":  "consumer",
+                                                              "page":  "0x000C",
+                                                              "usage":  "0x0224",
+                                                              "interface":  "MI_02\u0026COL02",
+                                                              "semantics":  "short"
+                                                          },
+                                                 "vol_down":  {
+                                                                  "source":  "consumer",
+                                                                  "page":  "0x000C",
+                                                                  "usage":  "0x00EA",
+                                                                  "interface":  "MI_02\u0026COL02",
+                                                                  "semantics":  "short"
+                                                              },
+                                                 "vol_up":  {
+                                                                "source":  "consumer",
+                                                                "page":  "0x000C",
+                                                                "usage":  "0x00E9",
+                                                                "interface":  "MI_02\u0026COL02",
+                                                                "semantics":  "short"
+                                                            },
+                                                 "prev":  {
+                                                              "source":  "consumer",
+                                                              "page":  "0x000C",
+                                                              "usage":  "0x00B6",
+                                                              "interface":  "MI_02\u0026COL02",
+                                                              "semantics":  "short"
+                                                          },
+                                                 "play_pause":  {
+                                                                    "source":  "consumer",
+                                                                    "page":  "0x000C",
+                                                                    "usage":  "0x00CD",
+                                                                    "interface":  "MI_02\u0026COL02",
+                                                                    "semantics":  "short"
+                                                                },
+                                                 "next":  {
+                                                              "source":  "consumer",
+                                                              "page":  "0x000C",
+                                                              "usage":  "0x00B5",
+                                                              "interface":  "MI_02\u0026COL02",
+                                                              "semantics":  "short"
+                                                          },
+                                                 "num_1":  {
+                                                               "source":  "keyboard",
+                                                               "vk":  "0x31",
+                                                               "key":  "D1",
+                                                               "sc":  "02",
+                                                               "interface":  "MI_02\u0026COL01",
+                                                               "semantics":  "short"
+                                                           },
+                                                 "num_2":  {
+                                                               "source":  "keyboard",
+                                                               "vk":  "0x32",
+                                                               "key":  "D2",
+                                                               "sc":  "03",
+                                                               "interface":  "MI_02\u0026COL01",
+                                                               "semantics":  "short"
+                                                           },
+                                                 "num_3":  {
+                                                               "source":  "keyboard",
+                                                               "vk":  "0x33",
+                                                               "key":  "D3",
+                                                               "sc":  "04",
+                                                               "interface":  "MI_02\u0026COL01",
+                                                               "semantics":  "short"
+                                                           },
+                                                 "num_4":  {
+                                                               "source":  "keyboard",
+                                                               "vk":  "0x34",
+                                                               "key":  "D4",
+                                                               "sc":  "05",
+                                                               "interface":  "MI_02\u0026COL01",
+                                                               "semantics":  "short"
+                                                           },
+                                                 "num_5":  {
+                                                               "source":  "keyboard",
+                                                               "vk":  "0x35",
+                                                               "key":  "D5",
+                                                               "sc":  "06",
+                                                               "interface":  "MI_02\u0026COL01",
+                                                               "semantics":  "short"
+                                                           },
+                                                 "num_6":  {
+                                                               "source":  "keyboard",
+                                                               "vk":  "0x36",
+                                                               "key":  "D6",
+                                                               "sc":  "07",
+                                                               "interface":  "MI_02\u0026COL01",
+                                                               "semantics":  "short"
+                                                           },
+                                                 "num_7":  {
+                                                               "source":  "keyboard",
+                                                               "vk":  "0x37",
+                                                               "key":  "D7",
+                                                               "sc":  "08",
+                                                               "interface":  "MI_02\u0026COL01",
+                                                               "semantics":  "short"
+                                                           },
+                                                 "num_8":  {
+                                                               "source":  "keyboard",
+                                                               "vk":  "0x38",
+                                                               "key":  "D8",
+                                                               "sc":  "09",
+                                                               "interface":  "MI_02\u0026COL01",
+                                                               "semantics":  "short"
+                                                           },
+                                                 "num_9":  {
+                                                               "source":  "keyboard",
+                                                               "vk":  "0x39",
+                                                               "key":  "D9",
+                                                               "sc":  "0A",
+                                                               "interface":  "MI_02\u0026COL01",
+                                                               "semantics":  "short"
+                                                           },
+                                                 "del":  {
+                                                             "source":  "keyboard",
+                                                             "vk":  "0x08",
+                                                             "key":  "Back",
+                                                             "sc":  "0E",
+                                                             "interface":  "MI_02\u0026COL01",
+                                                             "semantics":  "short"
+                                                         },
+                                                 "num_0":  {
+                                                               "source":  "keyboard",
+                                                               "vk":  "0x30",
+                                                               "key":  "D0",
+                                                               "sc":  "0B",
+                                                               "interface":  "MI_02\u0026COL01",
+                                                               "semantics":  "short"
+                                                           },
+                                                 "menu":  {
+                                                              "source":  "keyboard",
+                                                              "vk":  "0x5D",
+                                                              "key":  "Apps",
+                                                              "sc":  "E0 5D",
+                                                              "interface":  "MI_02\u0026COL01",
+                                                              "semantics":  "instant"
+                                                          },
+                                                 "power":  {
+                                                               "source":  "none",
+                                                               "status":  "no_event"
+                                                           }
+                                             },
+                                 "interfaces":  [
+                                                    {
+                                                        "vid":  "0x4842",
+                                                        "pid":  "0x0001",
+                                                        "interface":  "MI_02\u0026COL01",
+                                                        "raw_input_type":  "keyboard",
+                                                        "category":  "keyboard",
+                                                        "usage_page":  "0x0001",
+                                                        "usage":  "0x0006",
+                                                        "input_report_length":  0,
+                                                        "product":  "USB Composite Device",
+                                                        "manufacturer":  "HAOBO Technology"
+                                                    },
+                                                    {
+                                                        "vid":  "0x4842",
+                                                        "pid":  "0x0001",
+                                                        "interface":  "MI_02\u0026COL02",
+                                                        "raw_input_type":  "hid",
+                                                        "category":  "consumer-control",
+                                                        "usage_page":  "0x000C",
+                                                        "usage":  "0x0001",
+                                                        "input_report_length":  3,
+                                                        "product":  "USB Composite Device",
+                                                        "manufacturer":  "HAOBO Technology"
+                                                    },
+                                                    {
+                                                        "vid":  "0x4842",
+                                                        "pid":  "0x0001",
+                                                        "interface":  "MI_03",
+                                                        "raw_input_type":  "mouse",
+                                                        "category":  "mouse",
+                                                        "usage_page":  "0x0001",
+                                                        "usage":  "0x0002",
+                                                        "input_report_length":  0,
+                                                        "product":  "USB Composite Device",
+                                                        "manufacturer":  "HAOBO Technology"
+                                                    },
+                                                    {
+                                                        "vid":  "0x4842",
+                                                        "pid":  "0x0001",
+                                                        "interface":  "MI_04",
+                                                        "raw_input_type":  "hid",
+                                                        "category":  "vendor-specific",
+                                                        "usage_page":  "0xFF00",
+                                                        "usage":  "0x0000",
+                                                        "input_report_length":  65,
+                                                        "product":  "USB Composite Device",
+                                                        "manufacturer":  "HAOBO Technology"
+                                                    }
+                                                ]
+                             },
+                    "g10s":  {
+                                 "name":  "G10S",
+                                 "vid":  "0x1915",
+                                 "pid":  "0x1025",
+                                 "keyboard_interface":  "MI_02",
+                                 "mouse_interface":  "MI_03\u0026COL01",
+                                 "consumer_interface":  "MI_03\u0026COL02",
+                                 "vendor_interface":  null,
+                                 "voice_usage":  "0x00CF",
+                                 "voice_semantics":  "instant (tap only - use as a toggle)",
+                                 "buttons":  {
+                                                 "mic":  {
+                                                             "source":  "consumer",
+                                                             "page":  "0x000C",
+                                                             "usage":  "0x00CF",
+                                                             "interface":  "MI_03\u0026COL02",
+                                                             "semantics":  "instant"
+                                                         },
+                                                 "home_back":  {
+                                                                   "source":  "consumer",
+                                                                   "page":  "0x000C",
+                                                                   "usage":  "0x0224",
+                                                                   "interface":  "MI_03\u0026COL02",
+                                                                   "semantics":  "instant"
+                                                               },
+                                                 "play_pause":  {
+                                                                    "source":  "consumer",
+                                                                    "page":  "0x000C",
+                                                                    "usage":  "0x00CD",
+                                                                    "interface":  "MI_03\u0026COL02",
+                                                                    "semantics":  "short"
+                                                                },
+                                                 "mouse":  {
+                                                               "source":  "none",
+                                                               "status":  "no_event"
+                                                           },
+                                                 "up":  {
+                                                            "source":  "keyboard",
+                                                            "vk":  "0x26",
+                                                            "key":  "Up",
+                                                            "sc":  "E0 48",
+                                                            "interface":  "MI_02",
+                                                            "semantics":  "short"
+                                                        },
+                                                 "down":  {
+                                                              "source":  "keyboard",
+                                                              "vk":  "0x28",
+                                                              "key":  "Down",
+                                                              "sc":  "E0 50",
+                                                              "interface":  "MI_02",
+                                                              "semantics":  "short"
+                                                          },
+                                                 "left":  {
+                                                              "source":  "keyboard",
+                                                              "vk":  "0x25",
+                                                              "key":  "Left",
+                                                              "sc":  "E0 4B",
+                                                              "interface":  "MI_02",
+                                                              "semantics":  "short"
+                                                          },
+                                                 "right":  {
+                                                               "source":  "keyboard",
+                                                               "vk":  "0x27",
+                                                               "key":  "Right",
+                                                               "sc":  "E0 4D",
+                                                               "interface":  "MI_02",
+                                                               "semantics":  "short"
+                                                           },
+                                                 "ok":  {
+                                                            "source":  "keyboard",
+                                                            "vk":  "0x0D",
+                                                            "key":  "Return",
+                                                            "sc":  "1C",
+                                                            "interface":  "MI_02",
+                                                            "semantics":  "short"
+                                                        },
+                                                 "menu":  {
+                                                              "source":  "keyboard",
+                                                              "vk":  "0x5D",
+                                                              "key":  "Apps",
+                                                              "sc":  "E0 5D",
+                                                              "interface":  "MI_02",
+                                                              "semantics":  "short"
+                                                          },
+                                                 "page_up":  {
+                                                                 "source":  "keyboard",
+                                                                 "vk":  "0x21",
+                                                                 "key":  "PageUp",
+                                                                 "sc":  "E0 49",
+                                                                 "interface":  "MI_02",
+                                                                 "semantics":  "short"
+                                                             },
+                                                 "page_down":  {
+                                                                   "source":  "keyboard",
+                                                                   "vk":  "0x22",
+                                                                   "key":  "Next",
+                                                                   "sc":  "E0 51",
+                                                                   "interface":  "MI_02",
+                                                                   "semantics":  "short"
+                                                               },
+                                                 "vol_up":  {
+                                                                "source":  "consumer",
+                                                                "page":  "0x000C",
+                                                                "usage":  "0x00E9",
+                                                                "interface":  "MI_03\u0026COL02",
+                                                                "semantics":  "instant"
+                                                            },
+                                                 "vol_down":  {
+                                                                  "source":  "consumer",
+                                                                  "page":  "0x000C",
+                                                                  "usage":  "0x00EA",
+                                                                  "interface":  "MI_03\u0026COL02",
+                                                                  "semantics":  "short"
+                                                              },
+                                                 "del":  {
+                                                             "source":  "keyboard",
+                                                             "vk":  "0x08",
+                                                             "key":  "Back",
+                                                             "sc":  "0E",
+                                                             "interface":  "MI_02",
+                                                             "semantics":  "short"
+                                                         },
+                                                 "mute":  {
+                                                              "source":  "consumer",
+                                                              "page":  "0x000C",
+                                                              "usage":  "0x00E2",
+                                                              "interface":  "MI_03\u0026COL02",
+                                                              "semantics":  "short"
+                                                          },
+                                                 "power":  {
+                                                               "source":  "none",
+                                                               "status":  "no_event"
+                                                           }
+                                             },
+                                 "interfaces":  [
+                                                    {
+                                                        "vid":  "0x1915",
+                                                        "pid":  "0x1025",
+                                                        "interface":  "MI_02",
+                                                        "raw_input_type":  "keyboard",
+                                                        "category":  "keyboard",
+                                                        "usage_page":  "0x0001",
+                                                        "usage":  "0x0006",
+                                                        "input_report_length":  0,
+                                                        "product":  "MIC-Wireless Device",
+                                                        "manufacturer":  "2.4G Composite Device"
+                                                    },
+                                                    {
+                                                        "vid":  "0x1915",
+                                                        "pid":  "0x1025",
+                                                        "interface":  "MI_03\u0026COL01",
+                                                        "raw_input_type":  "mouse",
+                                                        "category":  "mouse",
+                                                        "usage_page":  "0x0001",
+                                                        "usage":  "0x0002",
+                                                        "input_report_length":  0,
+                                                        "product":  "MIC-Wireless Device",
+                                                        "manufacturer":  "2.4G Composite Device"
+                                                    },
+                                                    {
+                                                        "vid":  "0x1915",
+                                                        "pid":  "0x1025",
+                                                        "interface":  "MI_03\u0026COL02",
+                                                        "raw_input_type":  "hid",
+                                                        "category":  "consumer-control",
+                                                        "usage_page":  "0x000C",
+                                                        "usage":  "0x0001",
+                                                        "input_report_length":  3,
+                                                        "product":  "MIC-Wireless Device",
+                                                        "manufacturer":  "2.4G Composite Device"
+                                                    }
+                                                ]
+                             }
+                }
+}

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Airdeck</title>
+  <meta name="color-scheme" content="dark">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="rail">
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+          <rect x="9" y="1.5" width="14" height="29" rx="7" />
+          <circle cx="16" cy="9" r="3.6" class="brand-dot" />
+          <rect x="13" y="17" width="6" height="2" rx="1" />
+          <rect x="13" y="21.5" width="6" height="2" rx="1" />
+        </svg>
+        <div class="brand-text">
+          <b>Airdeck</b>
+          <span>signal desk</span>
+        </div>
+      </div>
+
+      <nav class="nav" id="nav">
+        <button data-view="live" class="on"><i>01</i>Remote</button>
+        <button data-view="profiles"><i>02</i>Profiles</button>
+        <button data-view="spots"><i>03</i>Input spots</button>
+        <button data-view="settings"><i>04</i>Settings</button>
+      </nav>
+
+      <section class="rail-remotes" id="railRemotes"></section>
+
+      <label class="kill" id="kill" title="Ctrl+Alt+Shift+F11">
+        <input type="checkbox" id="killBox">
+        <span class="kill-track"><span class="kill-knob"></span></span>
+        <span class="kill-text"><b>Profiles live</b><small>Flip to make every remote stock</small></span>
+      </label>
+    </aside>
+
+    <main class="main" id="main">
+      <section class="view view-live on" data-view="live" id="viewLive"></section>
+      <section class="view" data-view="profiles" id="viewProfiles"></section>
+      <section class="view" data-view="spots" id="viewSpots"></section>
+      <section class="view" data-view="settings" id="viewSettings"></section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="overlay" id="overlay" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>

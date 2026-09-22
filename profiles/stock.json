@@ -1,0 +1,5 @@
+{
+  "name": "Stock",
+  "description": "Default remote behaviour. The controller does not touch this remote at all.",
+  "buttons": {}
+}
