@@ -124,7 +124,18 @@ class Controller : IDisposable
     string DataPath(string name) { return Path.Combine(Root, "data", name); }
     public string ProfilesDir { get { return Path.Combine(Root, "profiles"); } }
     public bool InterceptionActive { get { return interception != null && interception.Active; } }
-    public bool InterceptionInstalled { get { return File.Exists(Path.Combine(Environment.SystemDirectory, "drivers", "keyboard.sys")); } }
+    // Registered as a keyboard-class filter (the driver file can linger after an uninstall until reboot).
+    public bool InterceptionInstalled
+    {
+        get
+        {
+            using (var k = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Class\{4d36e96b-e325-11ce-bfc1-08002be10318}"))
+            {
+                var filters = k == null ? null : k.GetValue("UpperFilters") as string[];
+                return filters != null && filters.Any(f => f.Equals("keyboard", StringComparison.OrdinalIgnoreCase));
+            }
+        }
+    }
 
     void Raise(string toast)
     {
@@ -315,7 +326,7 @@ class Controller : IDisposable
                 Ui.Send(_ => swallow = OnInterceptedKey(id, scan, up), null);
                 return swallow;
             });
-        interception.Start();
+        if (InterceptionInstalled) interception.Start();
 
         // Safety net: never leave a chord (e.g. Ctrl+Win) held if a release report goes missing.
         watchdog = new System.Windows.Forms.Timer { Interval = 1000 };
@@ -485,12 +496,25 @@ class Controller : IDisposable
         Ui.Post(_ => HandleButton(r, sig, edge), null);
     }
 
+    // True when the mapping just repeats what the key already sends (e.g. G10S OK = Enter -> "enter").
+    bool SendsItself(RemoteDef r, ButtonSig sig)
+    {
+        Dictionary<string, object> spec;
+        if (!r.Profile.Buttons.TryGetValue(sig.Id, out spec) || (spec["action"] as string) != "keys") return false;
+        try
+        {
+            var chord = Output.ParseChord(spec["keys"] as string ?? "");
+            return chord.Count == 1 && chord[0] == sig.Vk;
+        }
+        catch (FormatException) { return false; }
+    }
+
     // Remote keyboard keys the driver does not cover (not installed, or remote not linked yet).
     void OnUnfilteredKey(RemoteDef r, ButtonSig sig, int edge)
     {
         // Without the driver the key cannot be told apart from the main keyboard, so a mapped
         // action would double up with the original key: report it and leave it alone.
-        bool wouldMap = !Paused && r.Actions.ContainsKey(sig.Id);
+        bool wouldMap = !Paused && r.Actions.ContainsKey(sig.Id) && !SendsItself(r, sig);
         if (Web != null) Web.Broadcast("press", new Dictionary<string, object> { { "remote", r.Id }, { "button", sig.Id }, { "edge", edge }, { "action", null } });
         if (wouldMap && !InterceptionActive && warned.Add(r.Id + "/" + sig.Id))
         {
@@ -585,11 +609,14 @@ class Controller : IDisposable
             // Let the hook run (it is called on this thread while we pump messages).
             var until = clock.Elapsed.TotalMilliseconds + 300;
             while (clock.Elapsed.TotalMilliseconds < until) { Application.DoEvents(); Thread.Sleep(5); }
-            int after;
-            blockedDowns.TryGetValue(BrowserStop, out after);
-            bool ok = pendingBlock[BrowserStop].Count == 0 && after == before;
-            if (!ok) { pendingBlock[BrowserStop].Clear(); InstallHook(); }
-            result = ok ? "keyboard hook OK" : "keyboard hook was not blocking - reinstalled";
+            // The hook consumed our queued block => it saw the key and swallowed it.
+            bool ok = pendingBlock[BrowserStop].Count == 0;
+            if (!ok)
+            {
+                pendingBlock[BrowserStop].Clear();
+                InstallHook();
+            }
+            result = ok ? "keyboard hook OK" : "keyboard hook did not see the test key - reinstalled";
         }, null);
         Log.Write("self-test: {0}", result);
         return result;

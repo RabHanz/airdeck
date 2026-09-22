@@ -9,12 +9,6 @@
     "back": {"action": "keys", "keys": "escape"},
     "prev": {"action": "keys", "keys": "ctrl+shift+tab"},
     "next": {"action": "keys", "keys": "ctrl+tab"},
-    "play_pause": {"action": "keys", "keys": "enter"},
-    "_comment": "Buttons below are ordinary keyboard keys on the remote. They only switch to these actions once the optional Interception driver is installed; until then they keep their normal behaviour.",
-    "num_1": {"action": "keys", "keys": "win+1"},
-    "num_2": {"action": "keys", "keys": "win+2"},
-    "num_3": {"action": "keys", "keys": "win+3"},
-    "num_4": {"action": "keys", "keys": "win+4"},
-    "num_5": {"action": "keys", "keys": "win+5"}
+    "play_pause": {"action": "keys", "keys": "enter"}
   }
 }

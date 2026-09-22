@@ -66,14 +66,14 @@ Requirements: Windows 10/11 x64. Everything else (.NET Framework 4.8, Edge for t
    - adds **Airdeck** and **Airdeck Button Mapper** to the Start menu and an entry in *Settings → Apps*.
 3. Plug in your remote's USB receiver and open **Airdeck**.
 
-### Optional: remap the remote's keyboard keys
+### Optional, advanced: remap the remote's keyboard keys
 
-Home, Voice, Back, OK (G20S), volume and media keys work immediately. The arrows, digits, Pg+/Pg-, DEL and Menu reach Windows as ordinary keyboard keys, and remapping *only the remote's copy* needs the open-source [Interception](https://github.com/oblitum/Interception) filter driver:
+The included profiles need no driver: Home, Voice, Back, OK (G20S), volume and media keys are remapped per remote out of the box, and the remotes' arrows and digits keep working normally. The arrows, digits, Pg+/Pg-, DEL and Menu reach Windows as ordinary keyboard keys, and remapping *only the remote's copy* needs the open-source [Interception](https://github.com/oblitum/Interception) filter driver:
 
 1. In the install folder, right-click `tools\install-interception.cmd` and choose **Run as administrator**. It downloads Interception v1.0.1 from its official release and checks the file hash.
 2. **Restart Windows.** The driver only works once it has been loaded at boot; until then the remotes' keyboard keys may not respond.
 
-Airdeck only filters the remotes' keyboard interfaces, never your real keyboard. Undo with `tools\uninstall-interception.cmd`.
+Airdeck only filters the remotes' keyboard interfaces, never your real keyboard. Caveat (a driver limitation): a receiver re-plugged after boot loses its keyboard keys until the next restart. Undo with `tools\uninstall-interception.cmd` and re-plug the receivers.
 
 ### Optional: dictating into admin windows
 
@@ -97,9 +97,10 @@ Windows blocks input from normal apps into elevated windows. Use *Settings → R
 | Voice (tap) | Wispr Flow hands-free on/off |
 | OK, Play/Pause | Enter: send what you dictated |
 | Back | Cancel the dictation (Esc) |
-| Right / Left | Next / previous input spot |
-| 1–9 | Jump straight to input spot *n* |
-| Pg+ / Pg- | Next / previous virtual desktop |
+| Next / Previous (G10S: Mute) | Next / previous input spot |
+| Vol+ / Vol- | Next / previous virtual desktop |
+
+Everything above works without any driver or restart.
 
 ## Profiles are plain JSON
 
