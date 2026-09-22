@@ -340,9 +340,12 @@ class Controller : IDisposable
 
     // Common path for every remote button edge. Returns true when a profile action handled it
     // (so the original input must be suppressed).
+    string lastFocusId;
+
     bool HandleButton(RemoteDef r, ButtonSig sig, int edge)
     {
         r.LastUsedMs = clock.Elapsed.TotalMilliseconds;
+        if (lastFocusId != r.Id) { lastFocusId = r.Id; if (Changed != null) Changed(); } // tray tooltip follows the remote in hand
         string key = r.Id + "/" + sig.Id;
         bool repeat = edge == 1 && !r.Pressed.Add(sig.Id);
         if (edge == -1) r.Pressed.Remove(sig.Id);
@@ -405,18 +408,24 @@ class Controller : IDisposable
         }
         if (e.Edge == 0 || e.Device == null) return;
         var r = Remotes.FirstOrDefault(x => x.Vid == e.Device.Vid && x.Pid == e.Device.Pid);
+
+        // Driver loaded without a reboot: every keystroke tells the bridge which slot is which keyboard.
+        if (e.Kind == "key" && e.Device.Vid != -1 && InterceptionActive && interception.Learning
+            && interception.Observe(r != null ? r.HardwareTag : null, e.Key.Split('/')[1], e.Edge == -1))
+            Raise(r.Name + " keyboard keys linked — they now follow your profile");
+
         if (r == null) return;
         var sig = Resolve(r, e);
         if (sig == null) return;
 
         if (sig.Source == "keyboard")
         {
-            if (InterceptionActive) return; // handled (and possibly swallowed) on the driver path
+            if (InterceptionActive && interception.Covers(r.HardwareTag)) return; // handled (and possibly swallowed) on the driver path
             // Without the driver the key cannot be told apart from the main keyboard, so a mapped
             // action would double up with the original key: report it and leave it alone.
             bool wouldMap = !Paused && r.Actions.ContainsKey(sig.Id);
             if (Web != null) Web.Broadcast("press", new Dictionary<string, object> { { "remote", r.Id }, { "button", sig.Id }, { "edge", e.Edge }, { "action", null } });
-            if (wouldMap && warned.Add(r.Id + "/" + sig.Id))
+            if (wouldMap && !InterceptionActive && warned.Add(r.Id + "/" + sig.Id))
             {
                 Log.Write("{0} {1}: mapped in {2} but needs the Interception driver - passing through", r.Name, sig.Id, r.Profile.Name);
                 Raise(r.Name + " " + sig.Id + " needs the Interception driver (Settings)");
@@ -548,7 +557,13 @@ class Controller : IDisposable
             { "paused", Paused },
             { "spots", SpotList.Select(s => (object)s.ToJson()).ToList() },
             { "flow", new Dictionary<string, object> { { "ptt", Flow.Describe(Flow.Ptt) }, { "handsfree", Flow.Describe(Flow.HandsFree) }, { "command", Flow.Describe(Flow.Command) } } },
-            { "interception", new Dictionary<string, object> { { "installed", InterceptionInstalled }, { "active", InterceptionActive }, { "filtered", interception != null ? interception.FilteredCount : 0 } } },
+            { "interception", new Dictionary<string, object>
+                {
+                    { "installed", InterceptionInstalled }, { "active", InterceptionActive },
+                    { "filtered", interception != null ? interception.FilteredCount : 0 },
+                    { "learning", interception != null && interception.Learning },
+                    { "linked", Remotes.Where(r => InterceptionActive && interception.Covers(r.HardwareTag)).Select(r => (object)r.Id).ToList() },
+                } },
             { "settings", new Dictionary<string, object> { { "startWithWindows", StartWithWindows }, { "elevated", Elevated }, { "root", Root } } },
         };
     }
@@ -817,8 +832,34 @@ class TrayApp : ApplicationContext
         return string.Join("\n", controller.Remotes.Select(r => r.Name + ":  " + r.Profile.Name + (r.Connected ? "" : "  (not connected)")));
     }
 
+    DateTime lastLaunch = DateTime.MinValue;
+
+    // One app window only: focus the existing one; don't launch again while one is still starting.
+    // Short, glanceable tray tooltip (Windows caps it at 63 characters):
+    //   Airdeck / <what the remote in hand is doing> / Click to open
+    string Tooltip()
+    {
+        string state;
+        var connected = controller.Remotes.Where(r => r.Connected).ToList();
+        if (controller.Paused) state = "Paused — remotes are stock";
+        else if (connected.Count == 0) state = "No remote connected";
+        else
+        {
+            var r = controller.FocusRemote;
+            string profile = r.Profile.Name.Length > 28 ? r.Profile.Name.Substring(0, 27) + "…" : r.Profile.Name;
+            state = profile + " · " + r.Name;
+            if (connected.Count > 1 && connected.Any(x => x.Profile != r.Profile)) state += " +" + (connected.Count - 1);
+        }
+        string tip = "Airdeck\n" + state + "\nClick to open";
+        return tip.Length > 63 ? tip.Substring(0, 63) : tip;
+    }
+
     void OpenWindow()
     {
+        IntPtr existing = Spots.FindWindowByTitle("msedge", "Airdeck");
+        if (existing != IntPtr.Zero) { Spots.BringToFront(existing); return; }
+        if ((DateTime.Now - lastLaunch).TotalSeconds < 6) return;
+        lastLaunch = DateTime.Now;
         string edge = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), @"Microsoft\Edge\Application\msedge.exe");
         if (!File.Exists(edge)) edge = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"Microsoft\Edge\Application\msedge.exe");
         try
@@ -827,7 +868,8 @@ class TrayApp : ApplicationContext
             {
                 // A private profile keeps the app window separate from the user's normal browsing.
                 string profile = Path.Combine(controller.Root, "data", "app-window");
-                Process.Start(new ProcessStartInfo(edge, string.Format("--app={0} --user-data-dir=\"{1}\" --window-size=1480,940 --no-first-run --disable-features=Translate", web.Url, profile)) { UseShellExecute = false });
+                // Shell-execute so Edge inherits none of our handles (it would otherwise keep the UI port open after we exit).
+                Process.Start(new ProcessStartInfo(edge, string.Format("--app={0} --user-data-dir=\"{1}\" --window-size=1480,940 --no-first-run --disable-features=Translate", web.Url, profile)) { UseShellExecute = true });
             }
             else Process.Start(web.Url);
         }
@@ -836,29 +878,36 @@ class TrayApp : ApplicationContext
 
     void UpdateTray()
     {
-        string tip = "Airdeck — " + Summary().Replace("\n", ", ");
-        tray.Text = tip.Length > 63 ? tip.Substring(0, 63) : tip;
+        tray.Text = Tooltip();
         var old = tray.Icon;
-        tray.Icon = MakeIcon(!controller.Paused && controller.Remotes.Any(r => r.Profile.Id != "stock"));
+        tray.Icon = MakeIcon(!controller.Paused);
         if (old != null) { Win32.DestroyIcon(old.Handle); old.Dispose(); }
     }
 
-    static Icon MakeIcon(bool active)
+    // The app icon; greyed out while every remote is paused.
+    Icon MakeIcon(bool active)
     {
-        using (var bmp = new Bitmap(32, 32))
-        using (var g = Graphics.FromImage(bmp))
+        var size = SystemInformation.SmallIconSize;
+        string ico = Path.Combine(controller.Root, "assets", "airdeck.ico");
+        using (var src = File.Exists(ico) ? new Icon(ico, size) : Icon.ExtractAssociatedIcon(Application.ExecutablePath))
+        using (var bmp = src.ToBitmap())
         {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            using (var body = new GraphicsPath())
+            if (!active)
             {
-                body.AddArc(9, 1, 14, 14, 180, 180);
-                body.AddLine(23, 8, 23, 25);
-                body.AddArc(9, 18, 14, 13, 0, 180);
-                body.CloseFigure();
-                using (var b = new SolidBrush(Color.FromArgb(236, 232, 224))) g.FillPath(b, body);
+                var gray = new System.Drawing.Imaging.ColorMatrix(new[]
+                {
+                    new float[] { .3f, .3f, .3f, 0, 0 }, new float[] { .59f, .59f, .59f, 0, 0 }, new float[] { .11f, .11f, .11f, 0, 0 },
+                    new float[] { 0, 0, 0, .8f, 0 }, new float[] { 0, 0, 0, 0, 1 },
+                });
+                using (var attrs = new System.Drawing.Imaging.ImageAttributes())
+                using (var copy = new Bitmap(bmp))
+                using (var g = Graphics.FromImage(bmp))
+                {
+                    attrs.SetColorMatrix(gray);
+                    g.Clear(Color.Transparent);
+                    g.DrawImage(copy, new Rectangle(0, 0, bmp.Width, bmp.Height), 0, 0, copy.Width, copy.Height, GraphicsUnit.Pixel, attrs);
+                }
             }
-            using (var b = new SolidBrush(active ? Color.FromArgb(255, 178, 36) : Color.FromArgb(140, 140, 140))) g.FillEllipse(b, 11, 5, 10, 10);
-            using (var b = new SolidBrush(Color.FromArgb(40, 42, 48))) { g.FillEllipse(b, 13, 19, 6, 3); g.FillEllipse(b, 13, 24, 6, 3); }
             return Icon.FromHandle(bmp.GetHicon());
         }
     }
@@ -891,6 +940,9 @@ class TrayApp : ApplicationContext
         {
             ShortcutKeyDisplayString = "Ctrl+Alt+Shift+F9"
         });
+        string mapper = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "airdeck-mapper.exe");
+        if (File.Exists(mapper))
+            m.Items.Add(new ToolStripMenuItem("Button Mapper (new remotes)", null, (s, e) => Process.Start(mapper)));
         m.Items.Add(new ToolStripSeparator());
         m.Items.Add(new ToolStripMenuItem("Exit", null, (s, e) => ExitThread()) { ShortcutKeyDisplayString = "Ctrl+Alt+Shift+F12" });
     }

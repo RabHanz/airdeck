@@ -120,8 +120,10 @@ function buttonCaps(remote, btnId) {
   const sig = remote.buttons.find((b) => b.id === btnId);
   if (!sig || sig.source === "none") return { dead: true };
   const tapOnly = btnId === "mic";
-  const needsDriver = sig.source === "keyboard" && !S.state.interception.active;
-  return { sig, tapOnly, needsDriver };
+  const ic = S.state.interception;
+  const needsDriver = sig.source === "keyboard" && !ic.active;
+  const needsLink = sig.source === "keyboard" && ic.active && !(ic.linked || []).includes(remote.id);
+  return { sig, tapOnly, needsDriver, needsLink };
 }
 
 // ------------------------------------------------------------------ remote drawing
@@ -202,8 +204,9 @@ function remoteSvg(remote, tpl, profile) {
       const spec = profile.buttons[it.b.id];
       const caps = buttonCaps(remote, it.b.id);
       const info = ACTION_INFO[spec.action] || {};
-      let trig = info.hold ? "hold" : "press", warn = false;
+      let trig = info.hold && spec.action !== "keys" ? "hold" : "press", warn = false;
       if (caps.needsDriver) { trig = "needs driver"; warn = true; }
+      else if (caps.needsLink) { trig = "press once to link"; }
       else if (caps.tapOnly && info.hold) { trig = "tap-only button"; warn = true; }
       const L = side === "L";
       const ex = L ? -12 : W + 12, lx = L ? -46 : W + 46, tx = L ? -54 : W + 54;
@@ -348,11 +351,12 @@ function renderInspector() {
     : caps.sig.source === "consumer" ? `<code>Consumer ${esc(caps.sig.usage)}</code>`
     : `<code>Key ${esc(caps.sig.key)}</code>`;
   const capChip = caps.dead ? "" : caps.tapOnly ? `<span class="chip red">Tap only</span>`
-    : caps.needsDriver ? `<span class="chip amber">Keyboard key</span>` : `<span class="chip green">True hold</span>`;
+    : caps.needsDriver || caps.needsLink ? `<span class="chip amber">Keyboard key</span>` : `<span class="chip green">True hold</span>`;
 
   let notes = "";
   if (caps.dead) notes += `<p class="insp-note warn">This button is handled inside the remote (or by infrared) and never reaches the computer, so it can't be mapped.</p>`;
   if (caps.tapOnly) notes += `<p class="insp-note">The Voice button sends one short pulse however long you hold it. Use a tap action here \u2014 like Flow hands-free.</p>`;
+  if (caps.needsLink) notes += `<p class="insp-note amber">The keyboard-key driver is running. Press any arrow or number on the ${esc(r.name)} once and Airdeck links it; from then on this key follows the profile. Until then it works as ${esc(caps.sig.key)}.</p>`;
   if (caps.needsDriver) notes += `<p class="insp-note amber">This is an ordinary keyboard key. Its new action takes effect once the Interception driver is installed \u2014 until then it keeps working as ${esc(caps.sig.key)}. <button class="linkish" data-goto="settings">How to install</button></p>`;
   if (readOnly && !caps.dead) notes += `<p class="insp-note">Stock is read-only. Choosing an action creates your own profile and switches the ${esc(r.name)} to it.</p>`;
 
@@ -782,7 +786,10 @@ async function captureSpot() {
   const SECONDS = 4;
   overlay.hidden = false;
   overlay.innerHTML = `<div class="count"><div class="count-ring"><svg viewBox="0 0 200 200"><circle class="bg" cx="100" cy="100" r="90"/><circle class="fg" id="ring" cx="100" cy="100" r="90"/></svg><div class="count-num" id="countNum">${SECONDS}</div></div>
-    <b>Click into the input box now</b><p>Switch to the app and click where you'd type. Airdeck grabs it when the ring closes.</p></div>`;
+    <b>Click into the input box now</b><p>Switch to the app and click where you'd type. Airdeck grabs it when the ring closes.</p>
+    <button class="btn ghost" id="cancelCapture" style="margin-top:22px">Cancel</button></div>`;
+  let cancelled = false;
+  $("#cancelCapture").onclick = () => { cancelled = true; overlay.hidden = true; };
   const ring = $("#ring"), num = $("#countNum"), start = performance.now();
   const tick = () => {
     const t = (performance.now() - start) / 1000;
@@ -794,8 +801,9 @@ async function captureSpot() {
   try {
     const spot = await api("/api/spot-capture", { delayMs: SECONDS * 1000 });
     S.state = await api("/api/state");
-    // Clicking nowhere else captures this window; undo that.
-    if (/Airdeck/.test(spot.titleContains || "") || /^Airdeck/.test(spot.label)) {
+    // Cancelled, or nothing else was clicked (so it captured this window): undo the capture.
+    if (cancelled) { await saveSpots(S.state.spots.slice(0, -1)); toast("Capture cancelled"); }
+    else if (/Airdeck/.test(spot.titleContains || "") || /^Airdeck/.test(spot.label)) {
       const spots = S.state.spots.slice(0, -1);
       await saveSpots(spots);
       toast("That captured Airdeck itself \u2014 click into another app during the countdown", true);
@@ -828,8 +836,9 @@ function renderSettings() {
         ${set.elevated ? "" : `<button class="btn" id="elevate"><span class="ic">\uE7EF</span>Restart as administrator</button>`}
       </section>
       <section class="scard">
-        <h3>Keyboard-key driver ${ic.active ? `<span class="chip green">Active \u00B7 ${ic.filtered} remote interface${ic.filtered === 1 ? "" : "s"}</span>` : ic.installed ? `<span class="chip amber">Installed \u2014 re-plug receivers</span>` : `<span class="chip">Not installed</span>`}</h3>
+        <h3>Keyboard-key driver ${ic.active ? `<span class="chip green">Active \u00B7 ${ic.linked.length ? ic.linked.map((id) => esc(remoteById(id)?.name ?? id)).join(" + ") + " linked" : "ready"}</span>` : ic.installed ? `<span class="chip amber">Installed \u2014 re-plug receivers</span>` : `<span class="chip">Not installed</span>`}</h3>
         <p>Arrows, digits, Pg+/Pg-, DEL, Menu (and the G10S OK) reach Windows as ordinary keyboard keys. The open-source Interception driver lets Airdeck remap them on the remote only \u2014 your real keyboard is never filtered.</p>
+        ${ic.active && ic.learning ? `<p>Running without a reboot: each remote links the first time you press one of its keyboard keys (an arrow or a number). After the next restart Windows identifies the remotes directly.</p>` : ""}
         ${ic.active ? "" : `<ol class="steps"><li>Open the tools folder.</li><li>Right-click <code>install-interception.cmd</code> \u2192 <b>Run as administrator</b>.</li><li>Unplug and re-plug each remote's USB receiver (or reboot). Airdeck picks the driver up within seconds. Undo any time with <code>uninstall-interception.cmd</code>.</li></ol>
           <button class="btn" data-open="driver"><span class="ic">\uE838</span>Open tools folder</button>`}
       </section>
@@ -909,6 +918,9 @@ async function boot() {
   }
   if (location.search.includes("nosse")) return; // static render (screenshots)
   const events = new EventSource("/api/events");
+  // After Airdeck restarts the stream reconnects on its own; resync so nothing is stale.
+  let opened = false;
+  events.onopen = async () => { if (opened) { S.state = await api("/api/state"); renderAll(); } opened = true; };
   events.addEventListener("press", (e) => onPress(JSON.parse(e.data)));
   events.addEventListener("spot", (e) => flashSpot(JSON.parse(e.data).index));
   let pending = null;

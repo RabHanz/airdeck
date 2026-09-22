@@ -37,8 +37,29 @@ function Draw-Frame([int]$size) {
     return ,$ms.ToArray()
 }
 
+# Classic 32-bit DIB icon frame (BITMAPINFOHEADER + bottom-up BGRA + empty AND mask). Small sizes use
+# this format because .NET's Icon class (tray icon) misreads PNG-compressed frames.
+function Dib-Frame([byte[]]$png) {
+    $bmp = New-Object System.Drawing.Bitmap (New-Object System.IO.MemoryStream (, $png))
+    $w = $bmp.Width; $h = $bmp.Height
+    $rect = New-Object System.Drawing.Rectangle 0, 0, $w, $h
+    $data = $bmp.LockBits($rect, 'ReadOnly', [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $pixels = New-Object byte[] ($w * $h * 4)
+    [Runtime.InteropServices.Marshal]::Copy($data.Scan0, $pixels, 0, $pixels.Length)
+    $bmp.UnlockBits($data); $bmp.Dispose()
+    $maskRow = [int]([Math]::Ceiling($w / 32.0) * 4)
+    $ms = New-Object System.IO.MemoryStream
+    $bw = New-Object System.IO.BinaryWriter $ms
+    $bw.Write([uint32]40); $bw.Write([int32]$w); $bw.Write([int32]($h * 2)); $bw.Write([uint16]1); $bw.Write([uint16]32)
+    $bw.Write([uint32]0); $bw.Write([uint32]($w * $h * 4 + $maskRow * $h)); $bw.Write([int32]0); $bw.Write([int32]0); $bw.Write([uint32]0); $bw.Write([uint32]0)
+    for ($y = $h - 1; $y -ge 0; $y--) { $bw.Write($pixels, $y * $w * 4, $w * 4) }
+    $bw.Write((New-Object byte[] ($maskRow * $h)))
+    $bw.Flush()
+    return ,$ms.ToArray()
+}
+
 $sizes = 16, 24, 32, 48, 64, 128, 256
-$frames = $sizes | ForEach-Object { ,(Draw-Frame $_) }
+$frames = $sizes | ForEach-Object { $png = Draw-Frame $_; if ($_ -ge 256) { ,$png } else { ,(Dib-Frame $png) } }
 $fs = [System.IO.File]::Create($Out)
 $w = New-Object System.IO.BinaryWriter $fs
 $w.Write([uint16]0); $w.Write([uint16]1); $w.Write([uint16]$sizes.Count)
@@ -53,3 +74,8 @@ for ($i = 0; $i -lt $sizes.Count; $i++) {
 foreach ($f in $frames) { $w.Write($f) }
 $w.Close()
 Write-Host "Wrote $Out"
+
+# PNG copies for the app window (favicon / web manifest), so Windows shows the Airdeck icon, not a globe.
+$ui = Join-Path (Split-Path $PSScriptRoot -Parent) 'ui'
+foreach ($px in 32, 192, 512) { [IO.File]::WriteAllBytes((Join-Path $ui "icon-$px.png"), (Draw-Frame $px)) }
+Write-Host "Wrote ui\icon-32.png, icon-192.png, icon-512.png"

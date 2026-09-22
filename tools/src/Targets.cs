@@ -211,6 +211,14 @@ static class Spots
 
     public static IntPtr Foreground { get { return GetAncestor(GetForegroundWindow(), 2); } }
 
+    // First visible top-level window of a process whose title is exactly `title`.
+    public static IntPtr FindWindowByTitle(string process, string title)
+    {
+        return TopWindows().FirstOrDefault(h => Title(h) == title && ProcessName(h).Equals(process, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public static void BringToFront(IntPtr hwnd) { Activate(hwnd); }
+
     public static bool Matches(InputSpot s, IntPtr hwnd)
     {
         return hwnd != IntPtr.Zero && ProcessName(hwnd).Equals(s.Process, StringComparison.OrdinalIgnoreCase)

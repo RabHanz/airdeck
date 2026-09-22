@@ -40,6 +40,8 @@ class WebServer : IDisposable
     readonly List<Stream> sseClients = new List<Stream>();
     readonly BlockingCollection<byte[]> outbox = new BlockingCollection<byte[]>();
 
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")] static extern bool SetHandleInformation(IntPtr handle, uint mask, uint flags);
+
     public int Port { get; private set; }
     public string Url { get { return "http://127.0.0.1:" + Port + "/"; } }
 
@@ -57,6 +59,7 @@ class WebServer : IDisposable
             {
                 listener = new TcpListener(IPAddress.Loopback, port);
                 listener.Start();
+                SetHandleInformation(listener.Server.Handle, 1 /* HANDLE_FLAG_INHERIT */, 0); // child processes must not keep the port
                 Port = port;
                 break;
             }
@@ -176,6 +179,7 @@ class WebServer : IDisposable
             }
             Write(stream, Static(path));
         }
+        catch (IOException) { } // idle keep-alive/preconnect sockets timing out - normal browser behaviour
         catch (Exception ex) { Log.Write("http error: {0}", ex.Message); }
         finally
         {

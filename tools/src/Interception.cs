@@ -67,23 +67,88 @@ class InterceptionBridge : IDisposable
         return true;
     }
 
+    // When the driver was loaded without a reboot (receivers re-plugged) it attaches fine but cannot
+    // report hardware ids. In that case every keyboard slot is watched, strokes pass straight
+    // through, and a slot is linked to a remote the first time Raw Input reports the same key from
+    // that remote (see Observe). Slots proven to be other keyboards are released again.
+    bool learning;
+    readonly HashSet<int> released = new HashSet<int>();
+    readonly HashSet<int> seenSlots = new HashSet<int>(); // interception thread only
+    readonly List<Tuple<int, string, bool, DateTime>> recent = new List<Tuple<int, string, bool, DateTime>>();
+    string lastSummary = "";
+
+    public bool Learning { get { return learning; } }
+
+    public bool Covers(string hardwareTag)
+    {
+        lock (filtered) return filtered.Values.Any(v => v.IndexOf(hardwareTag, StringComparison.OrdinalIgnoreCase) >= 0);
+    }
+
     // Re-evaluate which keyboard slots belong to remotes (call after device arrival/removal).
     public void Rescan()
     {
         if (context == IntPtr.Zero) return;
         lock (filtered)
         {
-            filtered.Clear();
+            var found = new Dictionary<int, string>();
+            bool anyId = false;
             for (int dev = 1; dev <= 10; dev++)
             {
                 string id = HardwareId(dev);
-                if (id != null && isRemote(id)) filtered[dev] = id;
+                if (id == null) continue;
+                anyId = true;
+                if (isRemote(id)) found[dev] = id;
             }
-            predicate = d => { lock (filtered) return filtered.ContainsKey(d) ? 1 : 0; };
-            InterceptionNative.interception_set_filter(context, InterceptionNative.interception_is_keyboard, InterceptionNative.FILTER_KEY_NONE);
-            InterceptionNative.interception_set_filter(context, predicate, InterceptionNative.FILTER_KEY_ALL);
-            Log.Write("Interception filtering {0} remote keyboard interface(s): {1}", filtered.Count, string.Join("; ", filtered.Values));
+            learning = !anyId;
+            // Slot numbers can change when devices come and go, so learned links start over too.
+            filtered.Clear();
+            released.Clear();
+            foreach (var kv in found) filtered[kv.Key] = kv.Value;
+            ApplyFilter();
+            string summary = learning ? "learning mode (driver cannot report device ids until the next reboot)"
+                                      : filtered.Count + " remote keyboard interface(s): " + string.Join("; ", filtered.Values);
+            if (summary != lastSummary) Log.Write("Interception: {0}", summary);
+            lastSummary = summary;
         }
+    }
+
+    void ApplyFilter()
+    {
+        predicate = d => { lock (filtered) return (learning ? !released.Contains(d) : filtered.ContainsKey(d)) ? 1 : 0; };
+        InterceptionNative.interception_set_filter(context, InterceptionNative.interception_is_keyboard, InterceptionNative.FILTER_KEY_NONE);
+        InterceptionNative.interception_set_filter(context, predicate, InterceptionNative.FILTER_KEY_ALL);
+    }
+
+    // Called with every Raw Input keystroke (hardwareTag = the remote it came from, or null for
+    // any other keyboard). Returns true when a remote slot was newly linked.
+    public bool Observe(string hardwareTag, string scan, bool up)
+    {
+        if (!learning || context == IntPtr.Zero) return false;
+        int slot = -1;
+        lock (recent)
+        {
+            var now = DateTime.UtcNow;
+            var hit = recent.LastOrDefault(r => r.Item2 == scan && r.Item3 == up && (now - r.Item4).TotalMilliseconds < 400);
+            if (hit == null) return false;
+            recent.Remove(hit);
+            slot = hit.Item1;
+        }
+        lock (filtered)
+        {
+            if (hardwareTag != null)
+            {
+                if (filtered.ContainsKey(slot)) return false;
+                filtered[slot] = hardwareTag;
+                Log.Write("Interception: linked keyboard slot {0} to {1}", slot, hardwareTag);
+                return true;
+            }
+            if (!filtered.ContainsKey(slot) && released.Add(slot))
+            {
+                Log.Write("Interception: slot {0} is another keyboard - no longer filtered", slot);
+                ApplyFilter();
+            }
+        }
+        return false;
     }
 
     string HardwareId(int device)
@@ -105,14 +170,25 @@ class InterceptionBridge : IDisposable
 
             string id;
             lock (filtered) filtered.TryGetValue(device, out id);
+            ushort code = BitConverter.ToUInt16(stroke, 0);
+            ushort state = BitConverter.ToUInt16(stroke, 2);
+            string scan = ((state & InterceptionNative.KEY_E0) != 0 ? "E0 " : "") + ((state & InterceptionNative.KEY_E1) != 0 ? "E1 " : "") + code.ToString("X2");
+            bool up = (state & InterceptionNative.KEY_UP) != 0;
             bool swallow = false;
             if (id != null)
             {
-                ushort code = BitConverter.ToUInt16(stroke, 0);
-                ushort state = BitConverter.ToUInt16(stroke, 2);
-                string scan = ((state & InterceptionNative.KEY_E0) != 0 ? "E0 " : "") + ((state & InterceptionNative.KEY_E1) != 0 ? "E1 " : "") + code.ToString("X2");
-                try { swallow = decide(id, scan, (state & InterceptionNative.KEY_UP) != 0); }
+                try { swallow = decide(id, scan, up); }
                 catch (Exception ex) { Log.Write("interception decide failed: {0}", ex.Message); }
+            }
+            else if (learning)
+            {
+                // Unknown slot: pass it on and remember it so Raw Input can tell us whose it was.
+                if (seenSlots.Add(device)) Log.Write("Interception: first keystroke on unlinked slot {0} ({1})", device, scan);
+                lock (recent)
+                {
+                    recent.Add(Tuple.Create(device, scan, up, DateTime.UtcNow));
+                    if (recent.Count > 40) recent.RemoveAt(0);
+                }
             }
             if (!swallow) InterceptionNative.interception_send(context, device, stroke, 1);
         }
