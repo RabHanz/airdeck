@@ -217,9 +217,10 @@ static class Output
 static class Flow
 {
     public static List<ushort> Ptt = new List<ushort> { 0xA2, 0x5B };             // LCtrl + LWin
-    public static List<ushort> HandsFree = new List<ushort> { 0xA2, 0x5B, 0x20 };  // LCtrl + LWin + Space
+    public static List<ushort> HandsFree = new List<ushort> { 0xA2, 0x20, 0x5B };  // LCtrl + Space + LWin (Win last: see Load)
     public static List<ushort> Command = new List<ushort> { 0xA2, 0xA4, 0x5B };    // LCtrl + LAlt + LWin
 
+    static bool IsWin(ushort vk) { return vk == 0x5B || vk == 0x5C; }
     static bool IsModifier(ushort vk) { return (vk >= 0xA0 && vk <= 0xA5) || vk == 0x5B || vk == 0x5C || (vk >= 0x10 && vk <= 0x12); }
 
     // Reads the user's actual Flow shortcuts (e.g. "162+91": "ptt") from %APPDATA%\Wispr Flow\config.json.
@@ -235,7 +236,9 @@ static class Flow
             {
                 var codes = kv.Key.Split('+').Select(s => { int v; return int.TryParse(s, out v) ? v : -1; }).ToList();
                 if (codes.Any(c => c <= 0 || c > 0xFE)) continue; // skip mouse-button shortcuts
-                var chord = codes.Select(c => (ushort)c).OrderBy(v => IsModifier(v) ? 0 : 1).ToList();
+                // Order: Ctrl/Alt/Shift, then other keys, then Win last. Pressing Win before Space would
+                // trigger Windows' own Win+Space "switch input language" shortcut.
+                var chord = codes.Select(c => (ushort)c).OrderBy(v => IsWin(v) ? 2 : IsModifier(v) ? 0 : 1).ToList();
                 string name = kv.Value as string;
                 if (name == "ptt") Ptt = chord;
                 else if (name == "popo") HandsFree = chord;

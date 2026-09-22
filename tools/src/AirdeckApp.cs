@@ -563,6 +563,15 @@ class Controller : IDisposable
         Win32.MSG msg;
         while (Win32.PeekMessage(out msg, listener.Handle, (uint)Native.WM_INPUT, (uint)Native.WM_INPUT, Win32.PM_REMOVE)) Win32.DispatchMessage(ref msg);
 
+        bool block = Decide(vk, up);
+        // Diagnostic trail for browser/media keys (written off-thread so the hook stays instant).
+        string line = string.Format("hook: {0} {1} -> {2}", ((Keys)vk), up ? "up" : "down", block ? "blocked" : "passed");
+        Ui.Post(_ => Log.Write(line), null);
+        return block;
+    }
+
+    bool Decide(ushort vk, bool up)
+    {
         int downs;
         if (up)
         {
