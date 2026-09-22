@@ -134,6 +134,38 @@ static class Output
         Send(list);
     }
 
+    const ushort Guard = 0xE8; // unassigned virtual key
+
+    // For shortcuts like Win+Ctrl+Right: hold a neutral key first so the moment Win and Ctrl are
+    // both down never looks like a bare Win+Ctrl (Wispr Flow's push-to-talk) to other apps.
+    public static bool NeedsGuard(IList<ushort> chord)
+    {
+        bool win = chord.Any(v => v == 0x5B || v == 0x5C);
+        bool other = chord.Any(v => v >= 0xA0 && v <= 0xA5 || v >= 0x10 && v <= 0x12);
+        return win && other;
+    }
+
+    public static void GuardedDown(IList<ushort> chord)
+    {
+        if (!NeedsGuard(chord)) { Down(chord); return; }
+        Down(new List<ushort> { Guard }.Concat(chord).ToList());
+    }
+
+    public static void GuardedUp(IList<ushort> chord)
+    {
+        if (!NeedsGuard(chord)) { Up(chord); return; }
+        // Release the chord (key, then modifiers) while the guard is still down, then the guard.
+        // The guard being pressed during Win also stops the Start menu opening on Win's release.
+        var list = new List<Win32.INPUT>();
+        lock (Held)
+        {
+            foreach (var vk in chord.Reverse()) { list.Add(Key(vk, true)); Held.Remove(vk); }
+            list.Add(Key(Guard, true));
+            Held.Remove(Guard);
+        }
+        Send(list);
+    }
+
     public static void Up(IList<ushort> chord)
     {
         var list = new List<Win32.INPUT>();
@@ -293,7 +325,7 @@ abstract class RemoteAction
             case "flow_cancel": return new TapChord(() => new List<ushort> { (ushort)Keys.Escape }) { Description = "Flow cancel (Esc)" };
             case "keys":
                 var chord = Output.ParseChord(arg("keys") ?? "");
-                return new HoldChord(() => chord) { Description = "keys " + arg("keys") };
+                return new HoldChord(() => chord, true) { Description = "keys " + arg("keys") };
             case "text": return new TextAction(arg("text") ?? "") { Description = "type text" };
             case "left_click": return new ClickAction(Win32.MOUSEEVENTF_LEFTDOWN, Win32.MOUSEEVENTF_LEFTUP) { Description = "left click" };
             case "right_click": return new ClickAction(Win32.MOUSEEVENTF_RIGHTDOWN, Win32.MOUSEEVENTF_RIGHTUP) { Description = "right click" };
@@ -306,8 +338,8 @@ abstract class RemoteAction
                 if (!int.TryParse(arg("spot") ?? Convert.ToString(spec.ContainsKey("spot") ? spec["spot"] : ""), out n) || n < 1)
                     throw new FormatException("spot_goto needs \"spot\": 1, 2, ...");
                 return new CallAction(() => Workflow.Goto(n - 1)) { Description = "input spot " + n };
-            case "desktop_next": return new TapChord(() => Output.ParseChord("ctrl+win+right")) { Description = "next desktop" };
-            case "desktop_prev": return new TapChord(() => Output.ParseChord("ctrl+win+left")) { Description = "previous desktop" };
+            case "desktop_next": return new TapChord(() => Output.ParseChord("ctrl+win+right"), true) { Description = "next desktop" };
+            case "desktop_prev": return new TapChord(() => Output.ParseChord("ctrl+win+left"), true) { Description = "previous desktop" };
         }
         throw new FormatException("unknown action '" + action + "'");
     }
@@ -330,21 +362,38 @@ class CallAction : RemoteAction
 class BlockAction : RemoteAction { }
 
 // Holds a chord for as long as the remote button is held (push-to-talk style).
+// `guarded` is for ordinary shortcuts; Flow's own chords must go out exactly as Flow expects them.
 class HoldChord : RemoteAction
 {
     readonly Func<List<ushort>> chord;
+    readonly bool guarded;
     List<ushort> down;
-    public HoldChord(Func<List<ushort>> chord) { this.chord = chord; }
-    public override void Down() { if (down != null) return; down = chord(); Output.Down(down); }
-    public override void Up() { if (down == null) return; Output.Up(down); down = null; }
+    public HoldChord(Func<List<ushort>> chord, bool guarded = false) { this.chord = chord; this.guarded = guarded; }
+    public override void Down()
+    {
+        if (down != null) return;
+        down = chord();
+        if (guarded) Output.GuardedDown(down); else Output.Down(down);
+    }
+    public override void Up()
+    {
+        if (down == null) return;
+        if (guarded) Output.GuardedUp(down); else Output.Up(down);
+        down = null;
+    }
     public override void Cancel() { Up(); }
 }
 
 class TapChord : RemoteAction
 {
     readonly Func<List<ushort>> chord;
-    public TapChord(Func<List<ushort>> chord) { this.chord = chord; }
-    public override void Down() { Output.Tap(chord()); }
+    readonly bool guarded;
+    public TapChord(Func<List<ushort>> chord, bool guarded = false) { this.chord = chord; this.guarded = guarded; }
+    public override void Down()
+    {
+        var c = chord();
+        if (guarded) { Output.GuardedDown(c); Output.GuardedUp(c); } else Output.Tap(c);
+    }
 }
 
 class TextAction : RemoteAction

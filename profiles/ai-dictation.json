@@ -1,17 +1,24 @@
 {
   "name": "AI dictation workflow",
-  "description": "Hold Home to dictate, tap Voice for hands-free. Previous/Next hop between your input spots (G10S: Mute = next spot), Vol-/Vol+ switch desktops, OK or Play/Pause sends (Enter), Back cancels (Esc). No driver needed.",
+  "description": "Hold Home to dictate, tap Voice for hands-free, OK sends (Enter), Back cancels. Right/Left hop between your input spots, 1-9 jump straight to one, Pg+ (left) / Pg- (right) switch to the desktop on that side. Media and volume keys stay normal. Arrows, digits and Pg need the keyboard-key driver.",
   "buttons": {
     "home": {"action": "flow_ptt"},
     "home_back": {"action": "flow_ptt"},
     "mic": {"action": "flow_handsfree"},
-    "play_pause": {"action": "keys", "keys": "enter"},
-    "back": {"action": "flow_cancel"},
     "ok": {"action": "keys", "keys": "enter"},
-    "prev": {"action": "spot_prev"},
-    "next": {"action": "spot_next"},
-    "mute": {"action": "spot_next"},
-    "vol_down": {"action": "desktop_prev"},
-    "vol_up": {"action": "desktop_next"}
+    "back": {"action": "flow_cancel"},
+    "right": {"action": "spot_next"},
+    "left": {"action": "spot_prev"},
+    "page_up": {"action": "desktop_prev"},
+    "page_down": {"action": "desktop_next"},
+    "num_1": {"action": "spot_goto", "spot": 1},
+    "num_2": {"action": "spot_goto", "spot": 2},
+    "num_3": {"action": "spot_goto", "spot": 3},
+    "num_4": {"action": "spot_goto", "spot": 4},
+    "num_5": {"action": "spot_goto", "spot": 5},
+    "num_6": {"action": "spot_goto", "spot": 6},
+    "num_7": {"action": "spot_goto", "spot": 7},
+    "num_8": {"action": "spot_goto", "spot": 8},
+    "num_9": {"action": "spot_goto", "spot": 9}
   }
 }

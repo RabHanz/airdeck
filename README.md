@@ -95,12 +95,14 @@ Windows blocks input from normal apps into elevated windows. Use *Settings → R
 |---|---|
 | Home (hold) | Wispr Flow push-to-talk |
 | Voice (tap) | Wispr Flow hands-free on/off |
-| OK, Play/Pause | Enter: send what you dictated |
+| OK | Enter: send what you dictated |
 | Back | Cancel the dictation (Esc) |
-| Next / Previous (G10S: Mute) | Next / previous input spot |
-| Vol+ / Vol- | Next / previous virtual desktop |
+| Right / Left | Next / previous input spot |
+| 1–9 | Jump straight to input spot *n* |
+| Pg+ (left) / Pg- (right) | Desktop to the left / right |
+| Volume, media keys | Unchanged |
 
-Everything above works without any driver or restart.
+Home, Voice, OK and Back work without any driver. The arrows, 1–9 and Pg± need the optional keyboard-key driver below. Volume and media keys are left alone on purpose: Windows reads them straight from the remote, so remapping them would still change the volume or skip tracks.
 
 ## Profiles are plain JSON
 
