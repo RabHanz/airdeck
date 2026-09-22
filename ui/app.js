@@ -206,7 +206,7 @@ function remoteSvg(remote, tpl, profile) {
       const info = ACTION_INFO[spec.action] || {};
       let trig = info.hold && spec.action !== "keys" ? "hold" : "press", warn = false;
       if (caps.needsDriver) { trig = "needs driver"; warn = true; }
-      else if (caps.needsLink) { trig = "press once to link"; }
+      else if (caps.needsLink) { trig = S.state.interception.learning ? "restart windows" : "not identified"; warn = true; }
       else if (caps.tapOnly && info.hold) { trig = "tap-only button"; warn = true; }
       const L = side === "L";
       const ex = L ? -12 : W + 12, lx = L ? -46 : W + 46, tx = L ? -54 : W + 54;
@@ -356,7 +356,7 @@ function renderInspector() {
   let notes = "";
   if (caps.dead) notes += `<p class="insp-note warn">This button is handled inside the remote (or by infrared) and never reaches the computer, so it can't be mapped.</p>`;
   if (caps.tapOnly) notes += `<p class="insp-note">The Voice button sends one short pulse however long you hold it. Use a tap action here \u2014 like Flow hands-free.</p>`;
-  if (caps.needsLink) notes += `<p class="insp-note amber">The keyboard-key driver is running. Press any arrow or number on the ${esc(r.name)} once and Airdeck links it; from then on this key follows the profile. Until then it works as ${esc(caps.sig.key)}.</p>`;
+  if (caps.needsLink) notes += S.state.interception.learning ? `<p class="insp-note warn">Restart Windows to finish installing the keyboard-key driver. Until then this key may not respond.</p>` : `<p class="insp-note amber">The keyboard-key driver is running but the ${esc(r.name)} was not identified. Re-plug its receiver.</p>`;
   if (caps.needsDriver) notes += `<p class="insp-note amber">This is an ordinary keyboard key. Its new action takes effect once the Interception driver is installed \u2014 until then it keeps working as ${esc(caps.sig.key)}. <button class="linkish" data-goto="settings">How to install</button></p>`;
   if (readOnly && !caps.dead) notes += `<p class="insp-note">Stock is read-only. Choosing an action creates your own profile and switches the ${esc(r.name)} to it.</p>`;
 
@@ -836,10 +836,10 @@ function renderSettings() {
         ${set.elevated ? "" : `<button class="btn" id="elevate"><span class="ic">\uE7EF</span>Restart as administrator</button>`}
       </section>
       <section class="scard">
-        <h3>Keyboard-key driver ${ic.active ? `<span class="chip green">Active \u00B7 ${ic.linked.length ? ic.linked.map((id) => esc(remoteById(id)?.name ?? id)).join(" + ") + " linked" : "ready"}</span>` : ic.installed ? `<span class="chip amber">Installed \u2014 re-plug receivers</span>` : `<span class="chip">Not installed</span>`}</h3>
+        <h3>Keyboard-key driver ${ic.active && ic.learning ? `<span class="chip red">Restart Windows to finish</span>` : ic.active ? `<span class="chip green">Active \u00B7 ${ic.linked.length ? ic.linked.map((id) => esc(remoteById(id)?.name ?? id)).join(" + ") : "no remote"} filtered</span>` : ic.installed ? `<span class="chip amber">Installed \u2014 restart Windows</span>` : `<span class="chip">Not installed</span>`}</h3>
         <p>Arrows, digits, Pg+/Pg-, DEL, Menu (and the G10S OK) reach Windows as ordinary keyboard keys. The open-source Interception driver lets Airdeck remap them on the remote only \u2014 your real keyboard is never filtered.</p>
-        ${ic.active && ic.learning ? `<p>Running without a reboot: each remote links the first time you press one of its keyboard keys (an arrow or a number). After the next restart Windows identifies the remotes directly.</p>` : ""}
-        ${ic.active ? "" : `<ol class="steps"><li>Open the tools folder.</li><li>Right-click <code>install-interception.cmd</code> \u2192 <b>Run as administrator</b>.</li><li>Unplug and re-plug each remote's USB receiver (or reboot). Airdeck picks the driver up within seconds. Undo any time with <code>uninstall-interception.cmd</code>.</li></ol>
+        ${ic.active && ic.learning ? `<p class="insp-note warn">The driver was loaded without a restart, so it cannot tell devices apart yet and the remotes' arrow and number keys may not respond. Restart Windows once to finish installing it.</p>` : ""}
+        ${ic.active ? "" : `<ol class="steps"><li>Open the tools folder.</li><li>Right-click <code>install-interception.cmd</code> \u2192 <b>Run as administrator</b>.</li><li>Restart Windows to finish. Undo any time with <code>uninstall-interception.cmd</code>.</li></ol>
           <button class="btn" data-open="driver"><span class="ic">\uE838</span>Open tools folder</button>`}
       </section>
       <section class="scard">
@@ -863,6 +863,7 @@ function renderSettings() {
           <button class="btn" data-open="profiles"><span class="ic">\uE8B7</span>Profiles folder</button>
           <button class="btn" data-open="log"><span class="ic">\uE9F9</span>Open log</button>
           <button class="btn ghost" id="reload"><span class="ic">\uE72C</span>Reload</button>
+          <button class="btn ghost" id="selftest"><span class="ic">\uE9D9</span>Self-test</button>
         </div>
       </section>
     </div>`;
@@ -873,6 +874,7 @@ $("#viewSettings").addEventListener("click", async (e) => {
     if (e.target.closest("#startup")) { S.state = await api("/api/settings", { startWithWindows: !S.state.settings.startWithWindows }); renderSettings(); toast(S.state.settings.startWithWindows ? "Airdeck will start with Windows" : "Won't start with Windows"); }
     if (e.target.closest("#elevate")) { await api("/api/restart-admin", {}); toast("Approve the Windows prompt \u2014 Airdeck restarts as administrator"); }
     if (e.target.closest("#reload")) { S.state = await api("/api/reload", {}); renderAll(); }
+    if (e.target.closest("#selftest")) { const t = await api("/api/selftest", {}); toast(`${t.hook} \u00B7 driver: ${t.interception} \u00B7 ${t.remotes.join(", ")}`, !/OK/.test(t.hook)); }
     const open = e.target.closest("[data-open]");
     if (open) await api("/api/open", { what: open.dataset.open });
   } catch (err) { fail(err); }

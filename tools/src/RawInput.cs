@@ -279,15 +279,20 @@ class RawListener : NativeWindow
 
     public readonly List<string> Warnings = new List<string>();
     public readonly List<string> Registered = new List<string>();
-    public IEnumerable<HidDevice> KnownDevices { get { return devices.Values; } }
+    // Snapshot: other threads read this while the listener's thread may be refreshing it.
+    public IEnumerable<HidDevice> KnownDevices { get { lock (devices) return devices.Values.ToList(); } }
 
     protected override void WndProc(ref Message m)
     {
         if (m.Msg == Native.WM_INPUT) HandleInput(m.LParam);
         else if (m.Msg == Native.WM_INPUT_DEVICE_CHANGE)
         {
-            devices.Clear();
-            foreach (var d in Devices.Enumerate()) devices[d.Handle] = d;
+            var fresh = Devices.Enumerate();
+            lock (devices)
+            {
+                devices.Clear();
+                foreach (var d in fresh) devices[d.Handle] = d;
+            }
             sink(new InputEvent { Ms = clock.Elapsed.TotalMilliseconds, Kind = "device", Text = m.WParam.ToInt32() == 1 ? "device arrived" : "device removed" });
         }
         base.WndProc(ref m);

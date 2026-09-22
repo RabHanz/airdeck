@@ -1,5 +1,5 @@
 # Installs (or updates) Airdeck for the current user - no admin rights needed.
-#   - builds the app if needed (uses the C# compiler built into Windows)
+#   - builds the app (uses the C# compiler built into Windows)
 #   - copies it to %LOCALAPPDATA%\Programs\Airdeck (your profiles and data are never overwritten)
 #   - adds Start menu shortcuts and an entry in Settings > Apps
 #   - keeps "Start with Windows" if you had it on
@@ -14,8 +14,8 @@ $bin = Join-Path $src 'tools\bin'
 
 Write-Host "Installing Airdeck to $Target"
 
-# 1. Build (and fetch the Interception library) when needed.
-if (-not (Test-Path (Join-Path $bin 'airdeck.exe'))) { & (Join-Path $src 'tools\build.ps1') }
+# 1. Build (always, so an install never ships stale binaries; a build error stops the install).
+& (Join-Path $src 'tools\build.ps1')
 if (-not (Test-Path (Join-Path $bin 'interception.dll'))) {
     try { & (Join-Path $src 'tools\get-interception.ps1') -Root $src; & (Join-Path $src 'tools\build.ps1') }
     catch { Write-Warning "Interception library not downloaded ($($_.Exception.Message)). Remote keyboard keys stay unmapped until it is." }

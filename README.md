@@ -71,7 +71,7 @@ Requirements: Windows 10/11 x64. Everything else (.NET Framework 4.8, Edge for t
 Home, Voice, Back, OK (G20S), volume and media keys work immediately. The arrows, digits, Pg+/Pg-, DEL and Menu reach Windows as ordinary keyboard keys, and remapping *only the remote's copy* needs the open-source [Interception](https://github.com/oblitum/Interception) filter driver:
 
 1. In the install folder, right-click `tools\install-interception.cmd` and choose **Run as administrator**. It downloads Interception v1.0.1 from its official release and checks the file hash.
-2. **Unplug and re-plug each remote's receiver.** Airdeck picks the driver up within seconds, with no reboot needed.
+2. **Restart Windows.** The driver only works once it has been loaded at boot; until then the remotes' keyboard keys may not respond.
 
 Airdeck only filters the remotes' keyboard interfaces, never your real keyboard. Undo with `tools\uninstall-interception.cmd`.
 

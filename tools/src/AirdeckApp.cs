@@ -97,8 +97,8 @@ class Controller : IDisposable
     public SynchronizationContext Ui;
 
     readonly Stopwatch clock = Stopwatch.StartNew();
-    readonly Dictionary<ushort, double> pendingBlock = new Dictionary<ushort, double>();
-    readonly HashSet<ushort> blockedDown = new HashSet<ushort>();
+    // Input thread only: one entry per mapped consumer press still waiting for its synthesised key.
+    readonly Dictionary<ushort, Queue<double>> pendingBlock = new Dictionary<ushort, Queue<double>>();
     readonly HashSet<string> warned = new HashSet<string>();
     readonly Dictionary<string, RemoteAction> active = new Dictionary<string, RemoteAction>(); // held buttons
     readonly Dictionary<string, double> activeSince = new Dictionary<string, double>();
@@ -234,17 +234,19 @@ class Controller : IDisposable
         ReleaseRemote(r);
         var p = Profiles.FirstOrDefault(x => x.Id == profileId) ?? Profiles.First(x => x.Id == "stock");
         r.Profile = p;
-        r.Actions.Clear();
+        // Built aside and swapped in whole: the input thread reads this map without locking.
+        var actions = new Dictionary<string, RemoteAction>();
         foreach (var kv in p.Buttons)
         {
             if (!r.Buttons.Any(b => b.Id == kv.Key)) continue; // this remote does not have that button
             try
             {
                 var action = RemoteAction.Create(kv.Value);
-                if (action != null) r.Actions[kv.Key] = action;
+                if (action != null) actions[kv.Key] = action;
             }
             catch (FormatException ex) { Log.Write("{0}/{1}: {2}", p.Id, kv.Key, ex.Message); }
         }
+        r.Actions = actions;
     }
 
     public void SetProfile(RemoteDef r, string profileId)
@@ -275,15 +277,35 @@ class Controller : IDisposable
         get { return Remotes.Where(r => r.Connected).OrderByDescending(r => r.LastUsedMs).FirstOrDefault() ?? Remotes.FirstOrDefault(); }
     }
 
+    // Raw Input and the low-level keyboard hook live on their own thread. Windows silently removes a
+    // low-level hook whose thread is too slow to answer, so this thread never does UI or file work:
+    // it decides what to swallow and hands everything else to the UI thread.
+    Thread inputThread;
+    SynchronizationContext inputCtx;
+
     public void Start()
     {
-        listener = new RawListener(clock, d => Remotes.Any(r => r.Vid == d.Vid && r.Pid == d.Pid), OnRaw);
-        foreach (var w in listener.Warnings) Log.Write("raw input: {0}", w);
+        var ready = new ManualResetEvent(false);
+        inputThread = new Thread(() =>
+        {
+            using (var anchor = new Control()) anchor.CreateControl(); // installs a sync context for this thread
+            inputCtx = SynchronizationContext.Current;
+            listener = new RawListener(clock, d => Remotes.Any(r => r.Vid == d.Vid && r.Pid == d.Pid), OnRawInput);
+            foreach (var w in listener.Warnings) Log.Write("raw input: {0}", w);
+            InstallHook();
+            // Belt and braces: re-arm the hook every minute (new hook first, so there is no gap).
+            var rearm = new System.Windows.Forms.Timer { Interval = 60000 };
+            rearm.Tick += (s, e) => InstallHook();
+            rearm.Start();
+            ready.Set();
+            Application.Run();
+            rearm.Dispose();
+        }) { IsBackground = true, Name = "input", Priority = ThreadPriority.Highest };
+        inputThread.SetApartmentState(ApartmentState.STA);
+        inputThread.Start();
+        ready.WaitOne();
         RefreshConnected();
-
-        hookProc = HookCallback;
-        hook = Win32.SetWindowsHookEx(Win32.WH_KEYBOARD_LL, hookProc, Win32.GetModuleHandle(null), 0);
-        if (hook == IntPtr.Zero) Log.Write("keyboard hook failed: {0}", Marshal.GetLastWin32Error());
+        Task.Delay(1500).ContinueWith(_ => SelfTest());
 
         interception = new InterceptionBridge(
             id => Remotes.Any(r => id.IndexOf(r.HardwareTag, StringComparison.OrdinalIgnoreCase) >= 0),
@@ -393,49 +415,88 @@ class Controller : IDisposable
         return null;
     }
 
-    void OnRaw(InputEvent e)
+    void OnDeviceChange()
     {
-        if (e.Kind == "device")
+        RefreshConnected();
+        if (interception != null)
         {
-            RefreshConnected();
-            if (interception != null)
-            {
-                if (interception.Active) interception.Rescan();
-                else if (InterceptionInstalled) TryInterception();
-            }
-            Raise(null);
-            return;
+            if (interception.Active) interception.Rescan();
+            else if (InterceptionInstalled) TryInterception();
         }
+        Raise(null);
+    }
+
+    // ---- input thread ----------------------------------------------------------------------
+
+    readonly Dictionary<string, double> lastUpAt = new Dictionary<string, double>();
+    readonly HashSet<string> bounced = new HashSet<string>();
+    const double BounceMs = 120; // these remotes sometimes repeat a press ~30 ms later
+
+    // Every raw event lands here, on the input thread. Suppression bookkeeping happens right away;
+    // actions and UI updates are posted to the UI thread in order.
+    void OnRawInput(InputEvent e)
+    {
+        if (e.Kind == "device") { Ui.Post(_ => OnDeviceChange(), null); return; }
         if (e.Edge == 0 || e.Device == null) return;
         var r = Remotes.FirstOrDefault(x => x.Vid == e.Device.Vid && x.Pid == e.Device.Pid);
 
         // Driver loaded without a reboot: every keystroke tells the bridge which slot is which keyboard.
         if (e.Kind == "key" && e.Device.Vid != -1 && InterceptionActive && interception.Learning
             && interception.Observe(r != null ? r.HardwareTag : null, e.Key.Split('/')[1], e.Edge == -1))
-            Raise(r.Name + " keyboard keys linked — they now follow your profile");
+        {
+            var linked = r;
+            Ui.Post(_ => Raise(linked.Name + " keyboard keys linked — they now follow your profile"), null);
+        }
 
         if (r == null) return;
         var sig = Resolve(r, e);
         if (sig == null) return;
+        int edge = e.Edge;
 
         if (sig.Source == "keyboard")
         {
             if (InterceptionActive && interception.Covers(r.HardwareTag)) return; // handled (and possibly swallowed) on the driver path
-            // Without the driver the key cannot be told apart from the main keyboard, so a mapped
-            // action would double up with the original key: report it and leave it alone.
-            bool wouldMap = !Paused && r.Actions.ContainsKey(sig.Id);
-            if (Web != null) Web.Broadcast("press", new Dictionary<string, object> { { "remote", r.Id }, { "button", sig.Id }, { "edge", e.Edge }, { "action", null } });
-            if (wouldMap && !InterceptionActive && warned.Add(r.Id + "/" + sig.Id))
-            {
-                Log.Write("{0} {1}: mapped in {2} but needs the Interception driver - passing through", r.Name, sig.Id, r.Profile.Name);
-                Raise(r.Name + " " + sig.Id + " needs the Interception driver (Settings)");
-            }
+            Ui.Post(_ => OnUnfilteredKey(r, sig, edge), null);
             return;
         }
 
-        bool handled = HandleButton(r, sig, e.Edge);
+        // Consumer key: every mapped press must swallow exactly one synthesised virtual key, even a bounce.
+        bool mapped = !Paused && r.Actions.ContainsKey(sig.Id);
         ushort vk;
-        if (handled && e.Edge == 1 && consumerVk.TryGetValue(sig.Usage, out vk)) pendingBlock[vk] = e.Ms;
+        if (mapped && edge == 1 && consumerVk.TryGetValue(sig.Usage, out vk))
+        {
+            Queue<double> q;
+            if (!pendingBlock.TryGetValue(vk, out q)) pendingBlock[vk] = q = new Queue<double>();
+            q.Enqueue(e.Ms);
+        }
+
+        // Debounce: a repeat press within BounceMs of the release is the remote stuttering, not the user.
+        string key = r.Id + "/" + sig.Id;
+        if (edge == 1)
+        {
+            double up;
+            if (lastUpAt.TryGetValue(key, out up) && e.Ms - up < BounceMs) { bounced.Add(key); return; }
+        }
+        else
+        {
+            if (bounced.Remove(key)) return;
+            lastUpAt[key] = e.Ms;
+        }
+        Ui.Post(_ => HandleButton(r, sig, edge), null);
+    }
+
+    // Remote keyboard keys the driver does not cover (not installed, or remote not linked yet).
+    void OnUnfilteredKey(RemoteDef r, ButtonSig sig, int edge)
+    {
+        // Without the driver the key cannot be told apart from the main keyboard, so a mapped
+        // action would double up with the original key: report it and leave it alone.
+        bool wouldMap = !Paused && r.Actions.ContainsKey(sig.Id);
+        if (Web != null) Web.Broadcast("press", new Dictionary<string, object> { { "remote", r.Id }, { "button", sig.Id }, { "edge", edge }, { "action", null } });
+        if (wouldMap && !InterceptionActive && warned.Add(r.Id + "/" + sig.Id))
+        {
+            Log.Write("{0} {1}: mapped in {2} but needs the Interception driver - passing through", r.Name, sig.Id, r.Profile.Name);
+            Raise(r.Name + " " + sig.Id + " needs the Interception driver (Settings)");
+        }
     }
 
     bool OnInterceptedKey(string hardwareId, string scan, bool up)
@@ -445,6 +506,16 @@ class Controller : IDisposable
         var sig = r.Buttons.FirstOrDefault(b => b.Source == "keyboard" && b.Scan == scan);
         if (sig == null) return false;
         return HandleButton(r, sig, up ? -1 : 1);
+    }
+
+    void InstallHook()
+    {
+        IntPtr old = hook;
+        hookProc = HookCallback;
+        IntPtr fresh = Win32.SetWindowsHookEx(Win32.WH_KEYBOARD_LL, hookProc, Win32.GetModuleHandle(null), 0);
+        if (fresh == IntPtr.Zero) { Log.Write("keyboard hook failed: {0}", Marshal.GetLastWin32Error()); return; }
+        hook = fresh;
+        if (old != IntPtr.Zero) Win32.UnhookWindowsHookEx(old);
     }
 
     IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
@@ -458,6 +529,9 @@ class Controller : IDisposable
         return Win32.CallNextHookEx(hook, nCode, wParam, lParam);
     }
 
+    // Counts of synthesised key-downs we swallowed, so the matching key-ups go too.
+    readonly Dictionary<ushort, int> blockedDowns = new Dictionary<ushort, int>();
+
     bool ShouldBlock(ushort vk, bool up)
     {
         if (vk < 0xA6 || vk > 0xB7) return false; // only browser/media/volume keys are synthesised from consumer reports
@@ -465,14 +539,60 @@ class Controller : IDisposable
         Win32.MSG msg;
         while (Win32.PeekMessage(out msg, listener.Handle, (uint)Native.WM_INPUT, (uint)Native.WM_INPUT, Win32.PM_REMOVE)) Win32.DispatchMessage(ref msg);
 
-        if (up) return blockedDown.Remove(vk);
-        double t;
-        if (pendingBlock.TryGetValue(vk, out t))
+        int downs;
+        if (up)
         {
-            pendingBlock.Remove(vk);
-            if (clock.Elapsed.TotalMilliseconds - t < 300) { blockedDown.Add(vk); return true; }
+            if (!blockedDowns.TryGetValue(vk, out downs) || downs == 0) return false;
+            blockedDowns[vk] = downs - 1;
+            return true;
+        }
+        Queue<double> q;
+        double now = clock.Elapsed.TotalMilliseconds;
+        if (pendingBlock.TryGetValue(vk, out q))
+        {
+            while (q.Count > 0 && now - q.Peek() > 400) q.Dequeue(); // stale: its key never came
+            if (q.Count > 0)
+            {
+                q.Dequeue();
+                blockedDowns.TryGetValue(vk, out downs);
+                blockedDowns[vk] = downs + 1;
+                return true;
+            }
         }
         return false;
+    }
+
+    // Proves the hook is installed and blocking: queue a block for Browser Stop (harmless when it
+    // leaks), inject one untagged, and check the hook ate it. Re-installs the hook if not.
+    public string SelfTest()
+    {
+        if (inputCtx == null) return "input thread not running";
+        string result = null;
+        inputCtx.Send(_ =>
+        {
+            const ushort BrowserStop = 0xA9;
+            Queue<double> q;
+            if (!pendingBlock.TryGetValue(BrowserStop, out q)) pendingBlock[BrowserStop] = q = new Queue<double>();
+            q.Enqueue(clock.Elapsed.TotalMilliseconds);
+            int before;
+            blockedDowns.TryGetValue(BrowserStop, out before);
+            var down = new Win32.INPUT { type = Win32.INPUT_KEYBOARD };
+            down.wVk = BrowserStop;
+            down.kflags = Win32.KEYEVENTF_EXTENDEDKEY;
+            var upKey = down;
+            upKey.kflags |= Win32.KEYEVENTF_KEYUP;
+            Win32.SendInput(2, new[] { down, upKey }, Marshal.SizeOf(typeof(Win32.INPUT)));
+            // Let the hook run (it is called on this thread while we pump messages).
+            var until = clock.Elapsed.TotalMilliseconds + 300;
+            while (clock.Elapsed.TotalMilliseconds < until) { Application.DoEvents(); Thread.Sleep(5); }
+            int after;
+            blockedDowns.TryGetValue(BrowserStop, out after);
+            bool ok = pendingBlock[BrowserStop].Count == 0 && after == before;
+            if (!ok) { pendingBlock[BrowserStop].Clear(); InstallHook(); }
+            result = ok ? "keyboard hook OK" : "keyboard hook was not blocking - reinstalled";
+        }, null);
+        Log.Write("self-test: {0}", result);
+        return result;
     }
 
     // ------------------------------------------------------------ input spots
@@ -687,6 +807,19 @@ class Controller : IDisposable
                 return HttpResult.Json(new Dictionary<string, object> { { "ok", true } });
             }
 
+            case "/api/selftest":
+            {
+                string hook = null;
+                var t = new Thread(() => hook = SelfTest()); // SelfTest waits on the input thread; never block the UI thread's pump on it
+                t.Start();
+                while (t.IsAlive) { Application.DoEvents(); Thread.Sleep(10); }
+                return HttpResult.Json(new Dictionary<string, object>
+                {
+                    { "hook", hook }, { "interception", InterceptionActive ? (interception.Learning ? "restart Windows to finish" : "active") : InterceptionInstalled ? "installed, not loaded" : "not installed" },
+                    { "remotes", Remotes.Select(r => (object)(r.Name + (r.Connected ? " connected" : " not connected"))).ToList() },
+                });
+            }
+
             case "/api/reload":
                 LoadProfiles();
                 LoadSpots();
@@ -702,10 +835,16 @@ class Controller : IDisposable
         active.Clear();
         Output.ReleaseAll();
         if (interception != null) interception.Dispose();
-        if (hook != IntPtr.Zero) Win32.UnhookWindowsHookEx(hook);
-        hook = IntPtr.Zero;
         if (watchdog != null) watchdog.Dispose();
-        if (listener != null) listener.DestroyHandle();
+        // The hook and listener window belong to the input thread; tear them down there.
+        if (inputCtx != null)
+            inputCtx.Send(_ =>
+            {
+                if (hook != IntPtr.Zero) Win32.UnhookWindowsHookEx(hook);
+                hook = IntPtr.Zero;
+                if (listener != null) listener.DestroyHandle();
+                Application.ExitThread();
+            }, null);
     }
 }
 

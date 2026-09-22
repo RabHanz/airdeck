@@ -105,16 +105,18 @@ class InterceptionBridge : IDisposable
             released.Clear();
             foreach (var kv in found) filtered[kv.Key] = kv.Value;
             ApplyFilter();
-            string summary = learning ? "learning mode (driver cannot report device ids until the next reboot)"
+            string summary = learning ? "driver loaded without a restart - it cannot identify devices, so nothing is filtered. Restart Windows to finish installing it (until then the remotes' keyboard keys may not respond)."
                                       : filtered.Count + " remote keyboard interface(s): " + string.Join("; ", filtered.Values);
             if (summary != lastSummary) Log.Write("Interception: {0}", summary);
             lastSummary = summary;
         }
     }
 
+    // Only slots positively identified (by hardware id, or learned) are ever filtered, so a keyboard
+    // we cannot identify - including the user's real one - is never captured.
     void ApplyFilter()
     {
-        predicate = d => { lock (filtered) return (learning ? !released.Contains(d) : filtered.ContainsKey(d)) ? 1 : 0; };
+        predicate = d => { lock (filtered) return filtered.ContainsKey(d) ? 1 : 0; };
         InterceptionNative.interception_set_filter(context, InterceptionNative.interception_is_keyboard, InterceptionNative.FILTER_KEY_NONE);
         InterceptionNative.interception_set_filter(context, predicate, InterceptionNative.FILTER_KEY_ALL);
     }
