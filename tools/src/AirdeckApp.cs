@@ -426,15 +426,28 @@ class Controller : IDisposable
         return null;
     }
 
+    readonly HashSet<string> uncoveredWarned = new HashSet<string>();
+
     void OnDeviceChange()
     {
         RefreshConnected();
+        string warning = null;
         if (interception != null)
         {
-            if (interception.Active) interception.Rescan();
+            if (interception.Active)
+            {
+                interception.Rescan();
+                // Interception only serves devices present at boot: a receiver plugged in later gets no slot.
+                foreach (var r in Remotes.Where(x => x.Connected && !interception.Learning && !interception.Covers(x.HardwareTag)))
+                    if (uncoveredWarned.Add(r.Id))
+                    {
+                        Log.Write("{0} was connected after boot - the keyboard-key driver cannot serve it until Windows restarts", r.Name);
+                        warning = r.Name + " was plugged in after startup — its arrow/number keys need a Windows restart";
+                    }
+            }
             else if (InterceptionInstalled) TryInterception();
         }
-        Raise(null);
+        Raise(warning);
     }
 
     // ---- input thread ----------------------------------------------------------------------

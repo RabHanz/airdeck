@@ -58,7 +58,7 @@ class InterceptionBridge : IDisposable
         if (context != IntPtr.Zero) return true;
         try { context = InterceptionNative.interception_create_context(); }
         catch (DllNotFoundException) { if (!quiet) Log.Write("interception.dll not found - remote keyboard keys stay unmapped"); return false; }
-        if (context == IntPtr.Zero) { if (!quiet) Log.Write("Interception driver not loaded yet (install it, then re-plug the receivers or reboot)"); return false; }
+        if (context == IntPtr.Zero) { if (!quiet) Log.Write("Interception driver installed but not loaded yet - restart Windows"); return false; }
         Log.Write("Interception driver active");
         Rescan();
         running = true;
