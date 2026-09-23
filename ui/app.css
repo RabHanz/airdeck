@@ -427,7 +427,7 @@ select.field { appearance: none; background-image: linear-gradient(45deg, transp
 .variant-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
 .variant-row .chip { cursor: pointer; }
 .summary-row b { display: flex; flex-direction: column; gap: 2px; }
-.summary-row em { font: normal 11.5px var(--body); color: var(--amber-2); opacity: .85; }
+.summary-row em { display: block; margin-top: 3px; font: normal 11.5px var(--body); color: var(--amber-2); opacity: .85; }
 
 /* Callouts: calmer lines, clearer hierarchy */
 .callout path { stroke-width: 1.1; }
@@ -522,5 +522,17 @@ select.field optgroup { color: var(--muted); font-style: normal; }
 .callout .chip { opacity: 0; animation: fadeIn .5s var(--ease) .15s forwards; }
 .callout:hover .chip-r, .callout.sel .chip-r { fill: #3a2c12; stroke: var(--amber); }
 .callout .ca { font-size: 18px; }
-.callout .cb.gest { font-size: 13.5px; }
+.callout .cb.gest { font-size: 14.5px; }
 .callout .cb.warn { font-size: 11.5px; }
+
+/* Hold / double-tap rows under a callout title */
+.callout .gtag-r { fill: none; stroke: var(--amber-line); stroke-width: 1; opacity: 0; animation: fadeIn .5s var(--ease) forwards; }
+.callout .gtag-t { font: 700 11.5px var(--mono); letter-spacing: .08em; fill: var(--amber); text-anchor: middle; dominant-baseline: central; }
+.callout .ctext > * { animation-delay: inherit; }
+.pcard-maps em { display: block; margin-top: 2px; font: normal 11px var(--body); color: var(--amber-2); opacity: .85; text-align: right; }
+.summary-row em i, .pcard-maps em i { font-style: normal; text-transform: uppercase; font: 600 9.5px var(--mono); letter-spacing: .08em; color: var(--amber); border: 1px solid var(--amber-line); border-radius: 4px; padding: 0 5px; margin-right: 7px; }
+
+/* Remote header: the name block never wraps; the profile buttons take the rest of the row */
+.stage-head > div:first-child { flex: none; }
+.stage-head .eyebrow { white-space: nowrap; }
+.profile-strip { flex: 1; max-width: none; }

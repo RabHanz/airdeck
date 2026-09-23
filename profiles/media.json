@@ -1,0 +1,58 @@
+{
+  "name": "Media & video",
+  "description": "Watching and listening: YouTube, Netflix, Spotify, VLC and anything that shows the Windows media controls. OK plays / pauses (double-tap: fullscreen), Pg+/Pg- skip tracks or videos, Right/Left seek and Up/Down change the player volume as usual, DEL mutes (hold: captions), Back leaves fullscreen (hold: back a page). Voice still dictates, handy for search boxes.",
+  "buttons": {
+    "home": {
+      "action": "flow_ptt"
+    },
+    "home_back": {
+      "action": "flow_ptt"
+    },
+    "mic": {
+      "action": "flow_handsfree"
+    },
+    "ok": {
+      "action": "keys",
+      "keys": "media_play_pause",
+      "label": "Play / pause",
+      "double": {
+        "action": "keys",
+        "keys": "f",
+        "label": "Fullscreen"
+      }
+    },
+    "back": {
+      "action": "keys",
+      "keys": "esc",
+      "label": "Exit fullscreen",
+      "hold": {
+        "action": "keys",
+        "keys": "alt+left",
+        "label": "Back a page"
+      }
+    },
+    "page_up": {
+      "action": "keys",
+      "keys": "media_prev",
+      "label": "Previous track"
+    },
+    "page_down": {
+      "action": "keys",
+      "keys": "media_next",
+      "label": "Next track"
+    },
+    "del": {
+      "action": "keys",
+      "keys": "volume_mute",
+      "label": "Mute",
+      "hold": {
+        "action": "keys",
+        "keys": "c",
+        "label": "Captions"
+      }
+    },
+    "menu": {
+      "action": "profile_next"
+    }
+  }
+}

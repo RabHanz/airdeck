@@ -22,7 +22,7 @@ Airdeck fixes that. It works out **which physical device** each key came from an
 ## Features
 
 - **Device-specific remapping.** Remote Home = Flow push-to-talk; keyboard Home = still Home.
-- **Profiles per remote.** *AI dictation workflow*, *Couch & media*, *Presenting*, *Stock*, or your own. Cycle them from the remote itself (Menu), the app, the tray, or a hotkey. A small notice in the corner tells you where you landed; notices stack in order, and repeats of the same kind update in place.
+- **Profiles per remote.** *AI dictation workflow*, *Media & video*, *Video calls*, *Couch browsing*, *Presenting*, *Stock*, or your own. Cycle them from the remote itself (Menu), the app, the tray, or a hotkey. A small notice in the corner tells you where you landed; notices stack in order, and repeats of the same kind update in place.
 - **Per-app variants (optional).** A profile can swap in a variant while a given app is in front, for example to give OK a different meaning in one editor. Variants only store what they change. None ship by default, so every button does the same thing everywhere.
 - **Tap, hold and double-tap.** Every button can do up to three things. For example, OK sends Enter and holding it sends Ctrl+Enter.
 - **Multi-monitor.** Hold an arrow to jump to the screen in that direction (pointer and focus). Hold 0 to throw the current window to the next screen. Screens are found by their real arrangement, so a monitor above works too.
@@ -60,7 +60,7 @@ Airdeck fixes that. It works out **which physical device** each key came from an
 What each button actually sends is documented in [remote-button-map.md](remote-button-map.md) and [docs/DISCOVERY-REPORT.md](docs/DISCOVERY-REPORT.md).
 
 A few facts worth knowing about these remotes:
-- The Voice button only ever sends a tap, however long you hold it, so Airdeck uses it as a hands-free *toggle*. Home is a true hold and makes a great push-to-talk key.
+- The Voice button (both remotes) and the G20S Menu key only ever send a short tap, however long you hold them: the G20S keeps a long Menu press for its own backlight. They can have a double-tap but never a hold, and the app won't offer one. That's why Voice is a hands-free *toggle*. Home is a true hold and makes a great push-to-talk key.
 - The Mouse on/off key, and on the G20S the Mute and Power keys, never reach the PC.
 
 ## Install
@@ -100,28 +100,34 @@ Windows blocks input from normal apps into elevated windows. Use *Settings → R
 
 ### The AI dictation workflow profile
 
-| Button | Tap | Hold |
-|---|---|---|
-| Home | Wispr Flow push-to-talk (while held) | |
-| Voice | Wispr Flow hands-free on/off | |
-| OK | Enter: send what you dictated | Ctrl+Enter |
-| Back | Cancel the dictation | Undo (Ctrl+Z) |
-| Right / Left | Next / previous input spot | Go to the screen on the right / left |
-| Up / Down | Normal arrows | Go to the screen above / below |
-| Pg+ / Pg- | Previous / next app (keep pressing to walk further back, like Alt+Tab) | Desktop to the left / right |
-| 1–9 | Jump straight to input spot *n* | |
-| 0 | Paste the last Flow transcript | Move the window to the next screen |
-| DEL | Delete the previous word | |
-| Menu | Next profile | Save the focused box as an input spot |
-| Volume, media keys | Unchanged | |
+| Button | Tap | Hold | Double-tap |
+|---|---|---|---|
+| Home | Wispr Flow push-to-talk (while held) | | |
+| Voice | Wispr Flow hands-free on/off | | |
+| OK | Enter: send what you dictated | Ctrl+Enter | New line (Shift+Enter) |
+| Back | Cancel the dictation | Clear the box | Undo |
+| Right / Left | Next / previous input spot | Go to the screen on the right / left | |
+| Up / Down | Normal arrows | Go to the screen above / below | |
+| Pg+ / Pg- | Previous / next app (keep pressing to walk further back, like Alt+Tab) | Desktop to the left / right | |
+| 1–9 | Jump straight to input spot *n* | Save the box you're in as spot *n* (like a radio preset) | |
+| 0 | Paste the last Flow transcript | Move the window to the next screen | |
+| DEL | Delete the previous word | | |
+| Menu | Next profile | | |
+| Volume, media keys | Unchanged | | |
 
 Home, Voice, OK and Back work without any driver. The arrows, digits, Pg±, DEL and Menu need the optional keyboard-key driver above. Volume and media keys are left alone on purpose: Windows reads them straight from the remote, so remapping them would still change the volume or skip tracks. That is also why app switching lives on Pg± and not on Next/Previous.
 
 ### Other profiles
 
-- **Couch & media.** OK clicks (hold: right-click), Back goes back a page, Right/Left switch tabs, 1–9 jump to a tab, 0 opens a new tab, hold DEL closes one. Home and Voice still dictate.
-- **Presenting.** OK / Back go to the next / previous slide, Home blanks the screen, hold Menu starts the slideshow.
+- **Media & video.** YouTube, Netflix, Spotify, VLC and anything with Windows media controls. OK plays / pauses (double-tap: fullscreen), Pg+/Pg- skip tracks, Right/Left seek and Up/Down change the player volume as usual, DEL mutes (hold: captions), Back leaves fullscreen (hold: back a page).
+- **Video calls.** OK mutes / unmutes, Back turns the camera on / off, Pg+ raises your hand, Pg- shares your screen, hold DEL leaves the call. It uses Microsoft Teams shortcuts and switches to the Zoom or Google Meet ones by itself when those are in front, so each button means the same thing in every app.
+- **Couch browsing.** OK clicks (hold: right-click), Back goes back a page (hold: forward), Right/Left switch tabs, 1–9 jump to a tab, 0 opens a new tab (double-tap: reopen the last closed one), hold DEL closes one.
+- **Presenting.** OK / Back go to the next / previous slide, Home blanks the screen (hold: start the slideshow).
 - **Stock.** The remote exactly as it came. The Menu cycle skips it; use `Ctrl+Alt+Shift+F11` or the app to go stock.
+
+Voice toggles dictation in every profile, Home is push-to-talk everywhere except Presenting, and Menu always moves to the next profile.
+
+Double-taps are only used where two quick presses aren't a normal thing to do anyway. Pg±, Menu and DEL are often pressed several times in a row, so they don't have one.
 
 ## Profiles are plain JSON
 
@@ -146,13 +152,13 @@ A variant is a profile with `"extends": "my-mode"` and `"hidden": true` that lis
 
 Actions:
 - **Wispr Flow:** `flow_ptt`, `flow_handsfree`, `flow_command`, `flow_cancel`, `flow_paste_last`.
-- **Input spots:** `spot_next`, `spot_prev`, `spot_goto`, `spot_capture`.
+- **Input spots:** `spot_next`, `spot_prev`, `spot_goto`, `spot_capture` (with `"spot": n` it replaces spot *n*; without, it adds a new one).
 - **Windows and screens:** `app_next`, `app_prev`, `desktop_next`, `desktop_prev`, `screen_focus` and `window_to_screen` (with `"dir"`: `left`, `right`, `up`, `down`, or `next` for moving windows).
-- **Keys and text:** `keys`, which stays held while the button is held, and `text`.
+- **Keys and text:** `keys`, which stays held while the button is held (`"ctrl+a, backspace"` taps several chords in a row), and `text`.
 - **Mouse:** `left_click`, `right_click`, `middle_click`.
-- **Airdeck and system:** `profile_next`, `run`, `block`, and `passthrough` (the default).
+- **Airdeck and system:** `profile_next`, `profile_prev`, `run`, `block`, and `passthrough` (the default).
 
-Any action can carry `hold` and `double` sub-actions. A button with gestures waits briefly (450 ms for a hold, 280 ms for a double-tap) before acting on a plain tap.
+Double-taps count when the second press comes within 400 ms of the release; *Settings → Double-tap speed* makes that quicker or more relaxed. Any action can carry a `"label"` (the name shown in the app, e.g. `"Mute / unmute"` instead of `Ctrl+Shift+M`) and `hold` and `double` sub-actions. A button with a double-tap waits out that window before acting on a plain tap, so give double-taps only to buttons where that short delay is fine.
 
 Button ids come from [remote-devices.json](remote-devices.json).
 

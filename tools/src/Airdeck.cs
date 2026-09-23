@@ -338,6 +338,12 @@ abstract class RemoteAction
             case "flow_handsfree": return new TapChord(() => Flow.HandsFree) { Description = "Flow hands-free toggle" };
             case "flow_cancel": return new TapChord(() => new List<ushort> { (ushort)Keys.Escape }) { Description = "Flow cancel (Esc)" };
             case "keys":
+                // "ctrl+a, backspace": several chords tapped one after another.
+                if ((arg("keys") ?? "").Contains(","))
+                {
+                    var steps = arg("keys").Split(',').Select(k => Output.ParseChord(k)).Where(c => c.Count > 0).ToList();
+                    return new SequenceAction(steps) { Description = "keys " + arg("keys") };
+                }
                 var chord = Output.ParseChord(arg("keys") ?? "");
                 return new HoldChord(() => chord, true) { Description = "keys " + arg("keys") };
             case "text": return new TextAction(arg("text") ?? "") { Description = "type text" };
@@ -355,8 +361,16 @@ abstract class RemoteAction
             case "desktop_next": return new DesktopAction(+1) { Description = "next desktop" };
             case "desktop_prev": return new DesktopAction(-1) { Description = "previous desktop" };
             case "flow_paste_last": return new TapChord(() => Flow.PasteLast) { Description = "Flow paste last transcript" };
-            case "spot_capture": return new CallAction(() => Workflow.Capture()) { Description = "save input as spot" };
-            case "profile_next": return new CallAction(() => Workflow.NextProfile()) { Description = "next profile" };
+            case "spot_capture":
+            {
+                // "spot": n saves into that slot (hold 3 = the box you're in becomes spot 3).
+                int slot = 0;
+                if (spec.ContainsKey("spot") && (!int.TryParse(Convert.ToString(spec["spot"]), out slot) || slot < 1))
+                    throw new FormatException("spot_capture \"spot\" must be a number from 1");
+                return new CallAction(() => Workflow.Capture(slot)) { Description = slot > 0 ? "save input as spot " + slot : "save input as spot" };
+            }
+            case "profile_next": return new CallAction(() => Workflow.NextProfile(+1)) { Description = "next profile" };
+            case "profile_prev": return new CallAction(() => Workflow.NextProfile(-1)) { Description = "previous profile" };
             case "app_next": return new CallAction(() => Workflow.SwitchApp(+1)) { Description = "next app" };
             case "app_prev": return new CallAction(() => Workflow.SwitchApp(-1)) { Description = "previous app" };
             case "screen_focus":
@@ -381,9 +395,9 @@ static class Workflow
 {
     public static Action<int> Step = d => { };
     public static Action<int> Goto = i => { };
-    public static Action Capture = () => { };
+    public static Action<int> Capture = slot => { };
     public static Action<int> DesktopSwitched = d => { };
-    public static Action NextProfile = () => { };
+    public static Action<int> NextProfile = d => { };
     public static Action<int> SwitchApp = d => { };
     public static Action<string, string> Screen = (what, dir) => { };
 }
@@ -439,7 +453,8 @@ class DesktopAction : RemoteAction
 // elsewhere; here the tap waits until release (and, with a double-tap action, briefly after it).
 class GestureAction : RemoteAction
 {
-    public const int HoldMs = 450, DoubleMs = 280;
+    public const int HoldMs = 450;
+    public static int DoubleMs = 400; // how long after a release a second press still counts as a double-tap (Settings)
     public RemoteAction Tap;                  // may be filled in with the button's own key (see ApplyProfile)
     public readonly RemoteAction Hold, Double;
     readonly System.Windows.Forms.Timer holdTimer = new System.Windows.Forms.Timer { Interval = HoldMs };
@@ -488,7 +503,7 @@ class GestureAction : RemoteAction
         holdTimer.Stop();
         if (secondPress) { secondPress = false; Double.Up(); return; }
         if (holding) { holding = false; Hold.Up(); return; }
-        if (Double != null) { waitingSecond = true; doubleTimer.Start(); return; }
+        if (Double != null) { waitingSecond = true; doubleTimer.Interval = DoubleMs; doubleTimer.Start(); return; }
         Fire(Tap);
     }
 
@@ -542,6 +557,16 @@ class TapChord : RemoteAction
     {
         var c = chord();
         if (guarded) { Output.GuardedDown(c); Output.GuardedUp(c); } else Output.Tap(c);
+    }
+}
+
+class SequenceAction : RemoteAction
+{
+    readonly List<List<ushort>> steps;
+    public SequenceAction(List<List<ushort>> steps) { this.steps = steps; }
+    public override void Down()
+    {
+        foreach (var c in steps) { Output.GuardedDown(c); Output.GuardedUp(c); }
     }
 }
 

@@ -26,7 +26,7 @@
 
     { "id": "page_up",   "label": "Page up",   "glyph": "E70E", "shape": "rrect", "x": 58,  "y": 436, "w": 62, "h": 60, "r": 10 },
     { "id": "page_down", "label": "Page down", "glyph": "E70D", "shape": "rrect", "x": 58,  "y": 502, "w": 62, "h": 60, "r": 10 },
-    { "id": "mic",       "label": "Voice",     "glyph": "E720", "shape": "circle", "x": 133, "y": 469, "r": 34 },
+    { "id": "mic",       "label": "Voice",     "glyph": "E720", "shape": "circle", "x": 133, "y": 469, "r": 34, "tapOnly": true },
     { "id": "vol_up",    "label": "Vol +",     "text": "+",     "shape": "rrect", "x": 208, "y": 436, "w": 62, "h": 60, "r": 10 },
     { "id": "vol_down",  "label": "Vol -",     "text": "-",     "shape": "rrect", "x": 208, "y": 502, "w": 62, "h": 60, "r": 10 },
 

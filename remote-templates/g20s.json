@@ -27,7 +27,7 @@
     { "id": "home", "label": "Home", "glyph": "E80F", "shape": "band", "x": 134, "y": 250, "r": 140, "r2": 104, "a0": 38, "a1": 88 },
 
     { "id": "vol_down", "label": "Vol -", "glyph": "E992", "shape": "circle", "x": 61,  "y": 430, "r": 24 },
-    { "id": "mic",      "label": "Voice", "glyph": "E720", "shape": "circle", "x": 130, "y": 430, "r": 27 },
+    { "id": "mic",      "label": "Voice", "glyph": "E720", "shape": "circle", "x": 130, "y": 430, "r": 27, "tapOnly": true },
     { "id": "vol_up",   "label": "Vol +", "glyph": "E995", "shape": "circle", "x": 199, "y": 430, "r": 24 },
 
     { "id": "prev",       "label": "Previous",   "glyph": "E892", "shape": "circle", "x": 61,  "y": 494, "r": 24 },
@@ -45,7 +45,7 @@
     { "id": "num_9", "label": "9", "text": "9", "shape": "rrect", "x": 195, "y": 674, "w": 54, "h": 44, "r": 10 },
     { "id": "del",   "label": "DEL (backspace)", "text": "DEL", "shape": "rrect", "x": 61,  "y": 730, "w": 54, "h": 44, "r": 10 },
     { "id": "num_0", "label": "0", "text": "0", "shape": "rrect", "x": 128, "y": 730, "w": 54, "h": 44, "r": 10 },
-    { "id": "menu",  "label": "Menu / backlight", "glyph": "E700", "shape": "rrect", "x": 195, "y": 730, "w": 54, "h": 44, "r": 10 }
+    { "id": "menu",  "label": "Menu / backlight", "glyph": "E700", "shape": "rrect", "x": 195, "y": 730, "w": 54, "h": 44, "r": 10, "tapOnly": true }
   ],
   "steps": [
     { "id": "mic_hold",   "button": "mic",  "title": "Voice (mic) - hold 3 seconds", "holdMs": 3000,

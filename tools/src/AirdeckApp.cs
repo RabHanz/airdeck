@@ -168,9 +168,9 @@ class Controller : IDisposable
         LoadSpots();
         Workflow.Step = StepSpot;
         Workflow.Goto = JumpSpot;
-        Workflow.Capture = () => Task.Run(() =>
+        Workflow.Capture = slot => Task.Run(() =>
         {
-            try { CaptureSpot(); }
+            try { CaptureSpot(slot); }
             catch (Exception ex) { Ui.Post(_ => Raise("Could not save the input: " + ex.Message), null); }
         });
         Workflow.DesktopSwitched = d => Task.Run(() =>
@@ -179,7 +179,7 @@ class Controller : IDisposable
             var info = VirtualDesktops.Current();
             Ui.Post(_ => ShowNotice("desktop", info != null ? info.Item1 : (d > 0 ? "Next desktop →" : "← Previous desktop"), info != null ? info.Item2 : ""), null);
         });
-        Workflow.NextProfile = () => { var r = FocusRemote; if (r != null) CycleProfile(r); };
+        Workflow.NextProfile = d => { var r = FocusRemote; if (r != null) CycleProfile(r, d); };
         Workflow.SwitchApp = SwitchApp;
         Workflow.Screen = (what, dir) =>
         {
@@ -283,6 +283,8 @@ class Controller : IDisposable
                     if (r != null) { ApplyProfile(r, (string)kv.Value); r.BaseProfileId = r.Profile.Id; }
                 }
             Paused = d.ContainsKey("paused") && (bool)d["paused"];
+            int ms;
+            if (d.ContainsKey("doubleTapMs") && int.TryParse(Convert.ToString(d["doubleTapMs"]), out ms)) GestureAction.DoubleMs = Math.Max(200, Math.Min(800, ms));
         }
         catch (Exception ex) { Log.Write("state.json ignored: {0}", ex.Message); }
     }
@@ -291,7 +293,7 @@ class Controller : IDisposable
     {
         var profiles = new Dictionary<string, object>();
         foreach (var r in Remotes) profiles[r.Id] = r.BaseProfileId ?? r.Profile.Id;
-        WriteData("state.json", new Dictionary<string, object> { { "profiles", profiles }, { "paused", Paused } });
+        WriteData("state.json", new Dictionary<string, object> { { "profiles", profiles }, { "paused", Paused }, { "doubleTapMs", GestureAction.DoubleMs } });
     }
 
     void LoadSpots()
@@ -364,12 +366,12 @@ class Controller : IDisposable
     }
 
     // Next selectable profile (per-app variants are skipped: they switch in by themselves).
-    public void CycleProfile(RemoteDef r)
+    public void CycleProfile(RemoteDef r, int direction = 1)
     {
         // Stock is left out: a remote on Stock has no switcher button (F11 still makes everything stock).
         var choices = Profiles.Where(p => !p.Hidden && p.Id != "stock").ToList();
         int i = choices.FindIndex(p => p.Id == (r.BaseProfileId ?? r.Profile.Id));
-        SetProfile(r, choices[(i + 1) % choices.Count].Id);
+        SetProfile(r, choices[((i + direction) % choices.Count + choices.Count) % choices.Count].Id);
         ShowNotice("profile:" + r.Id, r.Profile.Name, r.Name + " · profile " + (choices.IndexOf(r.Profile) + 1) + " of " + choices.Count);
         lastForegroundProc = null; // re-apply any per-app variant for the window in front
     }
@@ -615,7 +617,9 @@ class Controller : IDisposable
 
     readonly Dictionary<string, double> lastUpAt = new Dictionary<string, double>();
     readonly HashSet<string> bounced = new HashSet<string>();
-    const double BounceMs = 120; // these remotes sometimes repeat a press ~30 ms later
+    // These remotes sometimes send a ghost second press ~30 ms after the release. Anything later is a
+    // real press: a quick human double-tap comes 70 ms or more after the release, so it must get through.
+    const double BounceMs = 45;
 
     // Every raw event lands here, on the input thread. Suppression bookkeeping happens right away;
     // actions and UI updates are posted to the UI thread in order.
@@ -838,15 +842,18 @@ class Controller : IDisposable
         });
     }
 
-    public InputSpot CaptureSpot()
+    // slot 0 adds a new spot at the end; slot n replaces spot n (or adds it as the next number when
+    // there aren't that many yet: spots have no gaps).
+    public InputSpot CaptureSpot(int slot = 0)
     {
         var s = Spots.CaptureFocused();
         Ui.Send(_ =>
         {
-            SpotList.Add(s);
+            bool replace = slot > 0 && slot <= SpotList.Count;
+            if (replace) SpotList[slot - 1] = s; else SpotList.Add(s);
             SaveSpots();
             Raise(null);
-            ShowNotice("spot", "Saved as spot " + SpotList.Count, s.Label);
+            ShowNotice("spot", (replace ? "Replaced spot " + slot : "Saved as spot " + SpotList.Count), s.Label);
         }, null);
         return s;
     }
@@ -897,6 +904,7 @@ class Controller : IDisposable
             { "paused", Paused },
             { "testMode", TestMode },
             { "uiVersion", UiVersion() },
+            { "doubleTapMs", GestureAction.DoubleMs },
             { "spots", SpotList.Select(s => (object)s.ToJson()).ToList() },
             { "flow", new Dictionary<string, object> { { "ptt", Flow.Describe(Flow.Ptt) }, { "handsfree", Flow.Describe(Flow.HandsFree) }, { "command", Flow.Describe(Flow.Command) }, { "pasteLast", Flow.Describe(Flow.PasteLast) } } },
             { "interception", new Dictionary<string, object>
@@ -1047,6 +1055,8 @@ class Controller : IDisposable
 
             case "/api/settings":
                 if (str("startWithWindows") != null) StartWithWindows = str("startWithWindows") == "True";
+                int dt;
+                if (str("doubleTapMs") != null && int.TryParse(str("doubleTapMs"), out dt)) { GestureAction.DoubleMs = Math.Max(200, Math.Min(800, dt)); SaveState(); }
                 Raise(null);
                 return HttpResult.Json(StateJson());
 

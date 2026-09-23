@@ -1,0 +1,34 @@
+{
+  "name": "Video calls · Google Meet",
+  "description": "Takes over while a browser is in front (Google Meet): the same buttons, with Meet shortcuts. Meet has no share-screen shortcut, and leaving closes the tab.",
+  "extends": "meetings",
+  "hidden": true,
+  "buttons": {
+    "ok": {
+      "action": "keys",
+      "keys": "ctrl+d",
+      "label": "Mute / unmute"
+    },
+    "back": {
+      "action": "keys",
+      "keys": "ctrl+e",
+      "label": "Camera on / off"
+    },
+    "page_up": {
+      "action": "keys",
+      "keys": "ctrl+alt+h",
+      "label": "Raise / lower hand"
+    },
+    "page_down": {
+      "action": "passthrough"
+    },
+    "del": {
+      "action": "passthrough",
+      "hold": {
+        "action": "keys",
+        "keys": "ctrl+w",
+        "label": "Leave (close tab)"
+      }
+    }
+  }
+}

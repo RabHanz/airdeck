@@ -1,25 +1,98 @@
 {
-  "name": "Couch & media",
-  "description": "Lean-back browsing and watching: OK clicks (hold: right-click), Back goes back a page, Right/Left switch tabs, 1-9 jump to a tab, hold DEL closes a tab. Home and Voice still dictate. Media and volume keys work as normal.",
+  "name": "Couch browsing",
+  "description": "Lean-back web browsing with the air mouse. OK clicks (hold: right-click), Back goes back a page (hold: forward), Right/Left switch tabs, 1-9 jump to a tab, 0 opens a new tab (double-tap: reopen the last closed one), hold DEL closes a tab. Home and Voice still dictate. Menu: next profile.",
   "buttons": {
-    "home": {"action": "flow_ptt"},
-    "home_back": {"action": "flow_ptt"},
-    "mic": {"action": "flow_handsfree"},
-    "ok": {"action": "left_click", "hold": {"action": "right_click"}},
-    "back": {"action": "keys", "keys": "alt+left"},
-    "right": {"action": "keys", "keys": "ctrl+tab"},
-    "left": {"action": "keys", "keys": "ctrl+shift+tab"},
-    "num_1": {"action": "keys", "keys": "ctrl+1"},
-    "num_2": {"action": "keys", "keys": "ctrl+2"},
-    "num_3": {"action": "keys", "keys": "ctrl+3"},
-    "num_4": {"action": "keys", "keys": "ctrl+4"},
-    "num_5": {"action": "keys", "keys": "ctrl+5"},
-    "num_6": {"action": "keys", "keys": "ctrl+6"},
-    "num_7": {"action": "keys", "keys": "ctrl+7"},
-    "num_8": {"action": "keys", "keys": "ctrl+8"},
-    "num_9": {"action": "keys", "keys": "ctrl+9"},
-    "num_0": {"action": "keys", "keys": "ctrl+t"},
-    "del": {"action": "passthrough", "hold": {"action": "keys", "keys": "ctrl+w"}},
-    "menu": {"action": "profile_next", "hold": {"action": "spot_capture"}}
+    "home": {
+      "action": "flow_ptt"
+    },
+    "home_back": {
+      "action": "flow_ptt"
+    },
+    "mic": {
+      "action": "flow_handsfree"
+    },
+    "ok": {
+      "action": "left_click",
+      "hold": {
+        "action": "right_click"
+      }
+    },
+    "back": {
+      "action": "keys",
+      "keys": "alt+left",
+      "label": "Back a page",
+      "hold": {
+        "action": "keys",
+        "keys": "alt+right",
+        "label": "Forward"
+      }
+    },
+    "right": {
+      "action": "keys",
+      "keys": "ctrl+tab",
+      "label": "Next tab"
+    },
+    "left": {
+      "action": "keys",
+      "keys": "ctrl+shift+tab",
+      "label": "Previous tab"
+    },
+    "num_1": {
+      "action": "keys",
+      "keys": "ctrl+1"
+    },
+    "num_2": {
+      "action": "keys",
+      "keys": "ctrl+2"
+    },
+    "num_3": {
+      "action": "keys",
+      "keys": "ctrl+3"
+    },
+    "num_4": {
+      "action": "keys",
+      "keys": "ctrl+4"
+    },
+    "num_5": {
+      "action": "keys",
+      "keys": "ctrl+5"
+    },
+    "num_6": {
+      "action": "keys",
+      "keys": "ctrl+6"
+    },
+    "num_7": {
+      "action": "keys",
+      "keys": "ctrl+7"
+    },
+    "num_8": {
+      "action": "keys",
+      "keys": "ctrl+8"
+    },
+    "num_9": {
+      "action": "keys",
+      "keys": "ctrl+9"
+    },
+    "num_0": {
+      "action": "keys",
+      "keys": "ctrl+t",
+      "label": "New tab",
+      "double": {
+        "action": "keys",
+        "keys": "ctrl+shift+t",
+        "label": "Reopen closed tab"
+      }
+    },
+    "del": {
+      "action": "passthrough",
+      "hold": {
+        "action": "keys",
+        "keys": "ctrl+w",
+        "label": "Close tab"
+      }
+    },
+    "menu": {
+      "action": "profile_next"
+    }
   }
 }

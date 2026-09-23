@@ -1,0 +1,36 @@
+{
+  "name": "Video calls · Zoom",
+  "description": "Takes over while Zoom is in front: the same buttons, with Zoom shortcuts.",
+  "extends": "meetings",
+  "hidden": true,
+  "buttons": {
+    "ok": {
+      "action": "keys",
+      "keys": "alt+a",
+      "label": "Mute / unmute"
+    },
+    "back": {
+      "action": "keys",
+      "keys": "alt+v",
+      "label": "Camera on / off"
+    },
+    "page_up": {
+      "action": "keys",
+      "keys": "alt+y",
+      "label": "Raise / lower hand"
+    },
+    "page_down": {
+      "action": "keys",
+      "keys": "alt+s",
+      "label": "Share screen"
+    },
+    "del": {
+      "action": "passthrough",
+      "hold": {
+        "action": "keys",
+        "keys": "alt+q",
+        "label": "Leave the call"
+      }
+    }
+  }
+}

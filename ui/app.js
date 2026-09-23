@@ -78,7 +78,7 @@ const ACTIONS = [
     { id: "spot_next", name: "Next input spot", hint: "Hop to the next saved input" },
     { id: "spot_prev", name: "Previous spot", hint: "Hop back one input" },
     { id: "spot_goto", name: "Go to spot\u2026", hint: "Jump straight to one input", param: "spot" },
-    { id: "spot_capture", name: "Save input as spot", hint: "Remember the box you're in" },
+    { id: "spot_capture", name: "Save input as spot", hint: "Remember the box you're in", param: "slot" },
   ]},
   { group: "Windows & screens", items: [
     { id: "app_next", name: "Next app", hint: "Like Alt+Tab, forward" },
@@ -96,6 +96,7 @@ const ACTIONS = [
   ]},
   { group: "Airdeck & system", items: [
     { id: "profile_next", name: "Next profile", hint: "Cycle your profiles" },
+    { id: "profile_prev", name: "Previous profile", hint: "Cycle back one profile" },
     { id: "run", name: "Open app / file\u2026", hint: "Launch anything", param: "run" },
     { id: "middle_click", name: "Middle click", hint: "Open in new tab", hold: true },
     { id: "block", name: "Disable button", hint: "Do nothing at all" },
@@ -111,13 +112,17 @@ const KEY_NAMES = {
   space: "Space", tab: "Tab", back: "Backspace", backspace: "Backspace", delete: "Del", del: "Del",
   pageup: "PgUp", pagedown: "PgDn", next: "PgDn", oemminus: "-", oemplus: "=", oemcomma: ",", oemperiod: ".",
   oemquestion: "/", oemsemicolon: ";", oemquotes: "'", oemopenbrackets: "[", oemclosebrackets: "]", oempipe: "\\",
+  media_play_pause: "Play/Pause", media_next: "Next track", media_prev: "Previous track",
+  volume_mute: "Mute", volume_up: "Volume up", volume_down: "Volume down", browser_back: "Back", browser_forward: "Forward",
 };
 const prettyKey = (k) => KEY_NAMES[k.toLowerCase()] ?? (k.length === 1 ? k.toUpperCase() : k[0].toUpperCase() + k.slice(1));
-const prettyChord = (spec) => (spec || "").split("+").filter(Boolean).map(prettyKey).join("+");
-const keycaps = (spec) => (spec || "").split("+").filter(Boolean).map((k) => `<span class="keycap">${esc(prettyKey(k))}</span>`).join('<span class="plus">+</span>');
+// "ctrl+a, backspace" is a sequence: chords tapped one after another.
+const prettyChord = (spec) => (spec || "").split(",").map((c) => c.trim().split("+").filter(Boolean).map(prettyKey).join("+")).filter(Boolean).join(", then ");
+const keycaps = (spec) => (spec || "").split(",").map((c) => c.trim().split("+").filter(Boolean).map((k) => `<span class="keycap">${esc(prettyKey(k))}</span>`).join('<span class="plus">+</span>')).filter(Boolean).join('<span class="plus">then</span>');
 
 function actionName(spec, short = false) {
   if (!spec || spec.action === "passthrough") return short ? "normal key" : "Its normal key";
+  if (spec.label) return short ? spec.label.charAt(0).toLowerCase() + spec.label.slice(1) : spec.label; // named in the profile
   switch (spec.action) {
     case "flow_ptt": return short ? "Flow talk" : "Flow push-to-talk";
     case "flow_handsfree": return short ? "hands-free" : "Flow hands-free";
@@ -128,7 +133,7 @@ function actionName(spec, short = false) {
       const spot = S.state.spots[(spec.spot | 0) - 1];
       return short ? `spot ${spec.spot}` : spot ? `Spot ${spec.spot} \u00B7 ${spot.label}` : `Input spot ${spec.spot}`;
     }
-    case "spot_capture": return short ? "save spot" : "Save input as spot";
+    case "spot_capture": return spec.spot ? (short ? `save as spot ${spec.spot}` : `Save input as spot ${spec.spot}`) : (short ? "save spot" : "Save input as spot");
     case "screen_focus": return short ? `screen ${spec.dir}` : `Go to screen ${DIRS[spec.dir] || spec.dir}`;
     case "window_to_screen": return short ? "move window" : spec.dir === "next" ? "Move window to next screen" : `Move window ${DIRS[spec.dir] || spec.dir}`;
     case "keys": return prettyChord(spec.keys) || "Shortcut";
@@ -142,7 +147,9 @@ function buttonCaps(remote, btnId) {
   const sig = remote.buttons.find((b) => b.id === btnId);
   if (!sig || sig.source === "none") return { dead: true };
   const ic = S.state.interception;
-  const tapOnly = btnId === "mic";
+  // Keys the remote only reports as a short pulse however long they're held (Voice; the G20S Menu,
+  // whose long press drives the remote's own backlight): taps and double-taps, never a hold.
+  const tapOnly = !!tplFor(remote.id)?.buttons.find((b) => b.id === btnId)?.tapOnly;
   const needsDriver = sig.source === "keyboard" && !ic.active;
   const needsLink = sig.source === "keyboard" && ic.active && !(ic.linked || []).includes(remote.id);
   const osReads = sig.source === "consumer" && ["0x00E9", "0x00EA", "0x00E2", "0x00B5", "0x00B6", "0x00CD", "0x00B7"].includes(sig.usage);
@@ -150,6 +157,27 @@ function buttonCaps(remote, btnId) {
 }
 
 // ------------------------------------------------------------------ remote drawing
+
+// How many of 1, 2, 3... in a row do "the same thing for n": jump to input spot n (optionally with
+// hold = save the box as spot n) or Ctrl+n. Returns { k, spots, save }.
+function digitRun(buttonsOf) {
+  const saveHold = (s, n) => s.hold && s.hold.action === "spot_capture" && (s.hold.spot | 0) === n && !s.hold.label;
+  const runOf = (test, withSave) => {
+    let k = 0;
+    for (; k < 9; k++) {
+      const s = buttonsOf(`num_${k + 1}`), n = k + 1;
+      if (!s || s.double || s.label || !(withSave ? saveHold(s, n) : !s.hold) || !test(s, n)) break;
+    }
+    return k;
+  };
+  const spot = (s, n) => s.action === "spot_goto" && (s.spot | 0) === n;
+  const runs = [
+    { k: runOf(spot, true), spots: true, save: true },
+    { k: runOf(spot, false), spots: true, save: false },
+    { k: runOf((s, n) => s.action === "keys" && s.keys === `ctrl+${n}`, false), spots: false, save: false },
+  ].sort((a, b) => b.k - a.k);
+  return runs[0];
+}
 
 const pt = (cx, cy, r, deg) => [cx + r * Math.cos(deg * Math.PI / 180), cy + r * Math.sin(deg * Math.PI / 180)];
 
@@ -273,6 +301,12 @@ function chipSvg(chip, x, y) {
   return `<rect class="chip-r" x="${x}" y="${y - 14}" width="${chip.w}" height="28" rx="7"/>${inner}`;
 }
 
+// Hold / double-tap as separate tagged lines (profile summary list).
+function gestureRows(spec) {
+  return [["hold", spec.hold], ["2×", spec.double]].filter(([, g]) => g)
+    .map(([t, g]) => `<em><i>${t}</i>${esc(cap1(actionName(g, true)))}</em>`).join("");
+}
+
 function gestureNote(spec) {
   const parts = [];
   if (spec.hold) parts.push(`hold \u2192 ${actionName(spec.hold, true)}`);
@@ -298,17 +332,21 @@ function remoteSvg(remote, tpl, profile) {
     return `<g class="${cls}" data-b="${b.id}">${title}${shapeSvg(b)}${label}${cap}</g>`;
   }).join("");
 
-  // Number pad: when 1-9 all do "the same thing for n", one bracket stands for all nine.
-  // Otherwise the digits are listed in order (1-5 on the left, 6-0 on the right) with a copy of
-  // each key, instead of nine lines fanning out from a grid.
+  // Number pad: a run of digits that do "the same thing for n" (1-9 -> input spots, or 1-8 while
+  // 9 does something else) shares one bracket. Every other mapped digit is listed on its own, in
+  // numeric order, with a copy of its key: never nine lines fanning out from the grid.
   const digits = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => tpl.buttons.find((b) => b.id === `num_${n}`));
   let group = null;
   if (digits.every(Boolean)) {
-    const specs = digits.map((b) => specOf(b.id));
-    const plain = (s) => s && !s.hold && !s.double;
-    const spotRun = specs.every((s, i) => plain(s) && s.action === "spot_goto" && (s.spot | 0) === i + 1);
-    const ctrlRun = specs.every((s, i) => plain(s) && s.action === "keys" && s.keys === `ctrl+${i + 1}`);
-    if (spotRun || ctrlRun) group = { ids: digits.map((b) => b.id), text: spotRun ? "Jump to input spot 1–9" : "Jump to tab 1–9" };
+    // A bracket covers whole rows of the keypad, so a run is cut back to its last full row
+    // (1-8 -> a 1-6 bracket, with 7 and 8 labelled on their own like 9).
+    const run = digitRun(specOf);
+    const k = Math.floor(run.k / 3) * 3;
+    if (k >= 3) group = {
+      ids: digits.slice(0, k).map((b) => b.id), range: `1–${k}`,
+      text: `${run.spots ? "Jump to input spot" : "Jump to tab"} 1–${k}`,
+      holdText: run.save ? `Save the box as spot 1–${k}` : "",
+    };
   }
 
   const items = tpl.buttons
@@ -319,22 +357,22 @@ function remoteSvg(remote, tpl, profile) {
     const bs = group.ids.map((id) => tpl.buttons.find((b) => b.id === id));
     const top = Math.min(...bs.map((b) => b.y - b.h / 2)), bottom = Math.max(...bs.map((b) => b.y + b.h / 2));
     const left = Math.min(...bs.map((b) => b.x - b.w / 2));
-    items.push({ group, b: { id: "num_1", text: "1–9" }, x: left, y: (top + bottom) / 2, top, bottom, side: "L", spec: specOf("num_1") });
+    items.push({ group, b: { id: "num_1", text: group.range }, x: left, y: (top + bottom) / 2, top, bottom, side: "L", spec: specOf("num_1") });
   }
 
-  // Digits listed in order when they don't form one run.
+  // Without a bracket, mapped digits are listed in order (1-5 left, 6-0 right) rather than fanning
+  // out from the grid. Beside a bracket, the few digits outside it keep their own place and line.
   const listed = ["num_1", "num_2", "num_3", "num_4", "num_5", "num_6", "num_7", "num_8", "num_9", "num_0"]
-    .map((id) => items.find((it) => it.b.id === id)).filter(Boolean);
-  if (!group && listed.length > 1) {
-    // Centred on the 1-9 grid so the keys around it (DEL, Menu) keep straight lines.
-    const grid = listed.filter((it) => it.b.id !== "num_0").map((it) => it.y);
-    const half = Math.ceil(listed.length / 2), step = 38;
-    const start = (Math.min(...grid) + Math.max(...grid)) / 2 - ((half - 1) * step) / 2 - 4;
-    listed.forEach((it, i) => {
+    .map((id) => items.find((it) => !it.group && it.b.id === id)).filter(Boolean);
+  if (!group && (listed.length > 1 || (listed.length === 1 && listed[0].b.id !== "num_0"))) {
+    const gridY = digits.filter(Boolean).map((b) => b.y);
+    const mid = (Math.min(...gridY) + Math.max(...gridY)) / 2;
+    const cols = [listed.slice(0, Math.ceil(listed.length / 2)), listed.slice(Math.ceil(listed.length / 2))];
+    cols.forEach((col, c) => col.forEach((it, i) => {
       it.list = true;
-      it.side = i < half ? "L" : "R";
-      it.y = start + (i < half ? i : i - half) * step;
-    });
+      it.side = c === 0 ? "L" : "R";
+      it.y = mid - ((col.length - 1) * 40) / 2 + i * 40; // spread further by the stacking below
+    }));
   }
 
   // Sides: left half -> left column, right half -> right column; a centre key takes the side that
@@ -358,40 +396,58 @@ function remoteSvg(remote, tpl, profile) {
   }
 
   const callouts = [];
+  const GAP = 10;
+  const isLineless = (it, side) => !it.group && !it.list && lineBlocked(it.b, side, tpl, ...edgePoint(it.b, side, tpl));
+  for (const it of items) {
+    it.rows = calloutRows(remote, it);
+    it.below = it.rows.length ? 10 + 21 * it.rows.length : 14; // 14 above the line, 14 below + 21 per extra row
+    if (!it.group && !it.list) it.y = edgePoint(it.b, it.side, tpl)[1];
+  }
+  const lineless = items.filter((it) => isLineless(it, it.side));
+  const placed = { L: [], R: [] };
   for (const side of ["L", "R"]) {
-    const list = items.filter((i) => i.side === side);
-    for (const it of list) {
-      it.twoLine = !!(gestureNote(it.spec) || calloutWarning(remote, it.b.id, it.spec));
-      it.below = it.twoLine ? 30 : 14;
-      if (!it.group && !it.list) it.y = edgePoint(it.b, side, tpl)[1];
-    }
+    const list = items.filter((i) => i.side === side && !lineless.includes(i));
     // A listed digit block stays together: other labels that fall inside it move below it.
     const block = list.filter((i) => i.list);
     if (block.length) {
       const b0 = Math.min(...block.map((i) => i.y)), b1 = Math.max(...block.map((i) => i.y));
       for (const it of list) if (!it.list && it.y >= b0 - 20 && it.y <= b1) it.y = b1 + 1;
     }
-    // Labels with a line are stacked first, as level with their key as they can be (each label
-    // spans 14 above its line to 14 or 30 below). Labels without a line then take the nearest free
-    // gap, so they never push a lined label out of level.
-    const GAP = 10;
-    const lineless = list.filter((it) => !it.group && !it.list && lineBlocked(it.b, side, tpl, ...edgePoint(it.b, side, tpl)));
-    const fixed = list.filter((it) => !lineless.includes(it)).sort((a, b) => a.y - b.y);
+    // Labels with a line are stacked first, as level with their key as they can be.
+    list.sort((a, b) => a.y - b.y);
     let prev = null;
-    for (const it of fixed) { it.ly = prev ? Math.max(it.y, prev.ly + prev.below + 14 + GAP) : it.y; prev = it; }
+    for (const it of list) { it.ly = prev ? Math.max(it.y, prev.ly + prev.below + 14 + GAP) : it.y; prev = it; }
     let next = null;
-    for (const it of [...fixed].reverse()) { it.ly = next ? Math.min(it.ly, next.ly - it.below - 14 - GAP) : Math.min(it.ly, H - 24 - it.below); next = it; }
-    const placed = [...fixed];
-    for (const f of lineless.sort((a, b) => a.y - b.y)) {
-      const fits = (y) => y - 14 >= -8 && y + f.below <= H - 8 &&
-        placed.every((o) => (y >= o.ly ? y - o.ly >= o.below + 14 + GAP : o.ly - y >= f.below + 14 + GAP));
-      let at = null;
-      for (let d = 0; d <= 260 && at === null; d += 2) at = fits(f.y + d) ? f.y + d : fits(f.y - d) ? f.y - d : null;
-      f.ly = at !== null ? at : Math.max(...placed.map((o) => o.ly + o.below)) + 14 + GAP;
-      placed.push(f);
-    }
-    list.sort((a, b) => a.ly - b.ly);
-    list.forEach((it, n) => callouts.push(calloutSvg(remote, tpl, it, side, n, W)));
+    for (const it of [...list].reverse()) { it.ly = next ? Math.min(it.ly, next.ly - it.below - 14 - GAP) : Math.min(it.ly, H - 24 - it.below); next = it; }
+    placed[side] = list;
+  }
+  // Labels without a line (OK, Down, Voice, 0...) then take the free spot nearest their key's
+  // height on either side, so they never push a lined label out of level or drift far away.
+  for (const f of lineless.sort((a, b) => a.y - b.y)) {
+    const fits = (side, y) => y - 14 >= -8 && y + f.below <= H - 8 &&
+      placed[side].every((o) => (y >= o.ly ? y - o.ly >= o.below + 14 + GAP : o.ly - y >= f.below + 14 + GAP));
+    // A spot level with another key on that side would read as that key's label: avoid it.
+    const beside = (side, y) => tpl.buttons.some((o) => {
+      const k = o !== f.b && keyBox(o);
+      return k && y >= k.y0 - 6 && y <= k.y1 + 6 && (side === "L" ? o.x < f.x - 4 : o.x > f.x + 4);
+    });
+    const best = (side) => {
+      let top = null;
+      for (let d = 0; d <= 300; d += 2) for (const y of [f.y + d, f.y - d]) {
+        if (!fits(side, y)) continue;
+        const score = d + (beside(side, y) ? 60 : 0);
+        if (!top || score < top.score) top = { side, y, score };
+      }
+      return top;
+    };
+    // Nearest good spot wins; on a tie the right column, so a key lands on the same side every time.
+    const cand = ["R", "L"].map(best).filter(Boolean).sort((a, b) => a.score - b.score);
+    const pick = cand[0] || { side: f.side, y: Math.max(...placed[f.side].map((o) => o.ly + o.below), 0) + 14 + GAP };
+    f.side = pick.side; f.ly = pick.y;
+    placed[pick.side].push(f);
+  }
+  for (const side of ["L", "R"]) {
+    placed[side].sort((a, b) => a.ly - b.ly).forEach((it, n) => callouts.push(calloutSvg(remote, tpl, it, side, n, W)));
   }
 
   const dots = (tpl.dots || []).map((d) => `<circle class="rdot" cx="${d.x}" cy="${d.y}" r="3"/>`).join("");
@@ -417,17 +473,30 @@ function calloutWarning(remote, id, spec) {
   const info = ACTION_INFO[spec.action] || {};
   if (caps.needsDriver) return "needs driver";
   if (caps.needsLink) return S.state.interception.learning ? "restart windows" : "not identified";
-  if (caps.tapOnly && info.hold) return "tap-only button";
+  if (caps.tapOnly && (info.hold || spec.hold)) return "can’t be held";
   if (caps.osReads) return "windows also reacts";
   return "";
 }
 
-// One label: a copy of the key, what a tap does, and (smaller) its hold / double-tap or a warning.
-// Lines are always one straight stroke from the key's outer edge to the label; keys boxed in by
-// their neighbours get no line and are recognised by the key copy instead.
+const cap1 = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+
+// The rows under a label's title: one per secondary action, then any warning.
+function calloutRows(remote, it) {
+  if (it.group) return it.group.holdText ? [{ tag: "HOLD", text: it.group.holdText }] : [];
+  const rows = [];
+  if (it.spec.hold) rows.push({ tag: "HOLD", text: cap1(actionName(it.spec.hold, true)) });
+  if (it.spec.double) rows.push({ tag: "2×", text: cap1(actionName(it.spec.double, true)) });
+  const warn = it.group ? "" : calloutWarning(remote, it.b.id, it.spec);
+  if (warn) rows.push({ warn });
+  return rows;
+}
+
+// One label: a copy of the key, what a tap does, then a row per hold / double-tap (tagged, in an
+// aligned column) and any warning. Lines are always one straight stroke from the key's outer edge
+// to the label; keys boxed in by their neighbours get no line and are recognised by the key copy.
 function calloutSvg(remote, tpl, it, side, n, W) {
   const L = side === "L", spec = it.spec;
-  const chip = it.group ? { text: "1–9", w: 46 } : keyChip(it.b);
+  const chip = it.group ? { text: it.group.range, w: 46 } : keyChip(it.b);
   // Text sits in a fixed column so every title lines up; the key copy sits against the text and
   // the line runs from the key to the copy.
   const tx = L ? -74 : W + 74;
@@ -450,17 +519,25 @@ function calloutSvg(remote, tpl, it, side, n, W) {
     }
   }
 
-  const warn = calloutWarning(remote, it.b.id, spec);
-  const gest = gestureNote(spec);
   const title = it.group ? it.group.text : spec.action === "passthrough" ? "Normal key" : actionName(spec);
   const clip = (s, k) => (s.length > k ? s.slice(0, k - 1) + "…" : s);
-  const sub = warn || gest;
   const delay = (0.2 + n * 0.05).toFixed(2);
+  const TAG = 42;
+  const rows = it.rows.map((r, k) => {
+    const y = ly + 6 + 21 * (k + 1);
+    if (r.warn) return `<text class="cb warn" x="${tx}" y="${y}" text-anchor="${anchor}">${esc(r.warn)}</text>`;
+    const tagX = L ? tx - TAG : tx;
+    return `<rect class="gtag-r" x="${tagX}" y="${y - 13.5}" width="${TAG}" height="18" rx="4.5"/>
+      <text class="gtag-t" x="${tagX + TAG / 2}" y="${y - 4.5}">${r.tag}</text>
+      <text class="cb gest" x="${L ? tx - TAG - 7 : tx + TAG + 7}" y="${y}" text-anchor="${anchor}">${esc(clip(r.text, 30))}</text>`;
+  }).join("");
   return `<g class="callout${S.selected === it.b.id || (it.group && it.group.ids.includes(S.selected)) ? " sel" : ""}" data-b="${it.b.id}">
     ${line}
     <g class="chip">${chipSvg(chip, chipX, ly)}</g>
-    <text class="ca" x="${tx}" y="${ly + 6}" text-anchor="${anchor}" style="animation-delay:${delay}s">${esc(clip(title, 30))}</text>
-    ${sub ? `<text class="cb${warn ? " warn" : " gest"}" x="${tx}" y="${ly + 25}" text-anchor="${anchor}" style="animation-delay:${delay}s">${esc(clip(sub, 46))}</text>` : ""}
+    <g class="ctext" style="animation-delay:${delay}s">
+      <text class="ca" x="${tx}" y="${ly + 6}" text-anchor="${anchor}">${esc(clip(title, 30))}</text>
+      ${rows}
+    </g>
   </g>`;
 }
 
@@ -629,14 +706,16 @@ function renderInspector() {
     const order = (tpl ? tpl.buttons : r.buttons).map((b) => b.id);
     let rows = Object.entries(prof.buttons).filter(([id]) => r.buttons.some((b) => b.id === id))
       .sort(([a], [b]) => (order.indexOf(a) + 1 || 999) - (order.indexOf(b) + 1 || 999));
-    // 1-9 doing "the same thing for n" read as one row, like the bracket on the drawing.
-    const digitSpecs = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => prof.buttons[`num_${n}`]);
-    const spotRun = digitSpecs.every((s, i) => s && s.action === "spot_goto" && (s.spot | 0) === i + 1 && !s.hold && !s.double);
-    const ctrlRun = digitSpecs.every((s, i) => s && s.action === "keys" && s.keys === `ctrl+${i + 1}` && !s.hold && !s.double);
-    if (spotRun || ctrlRun) {
-      const at = rows.findIndex(([id]) => /^num_[1-9]$/.test(id));
-      rows = rows.filter(([id]) => !/^num_[1-9]$/.test(id));
-      rows.splice(at, 0, ["num_1", { action: "passthrough", label: spotRun ? "Jump to input spot 1–9" : "Jump to tab 1–9", rowLabel: "1 – 9" }]);
+    // A run of digits doing "the same thing for n" (1-9, or 1-8 while 9 differs) reads as one row,
+    // like the bracket on the drawing.
+    const run = digitRun((id) => prof.buttons[id]);
+    const k = Math.floor(run.k / 3) * 3; // whole keypad rows, as on the drawing
+    if (k >= 3) {
+      const inRun = (id) => new RegExp(`^num_[1-${k}]$`).test(id);
+      const at = rows.findIndex(([id]) => inRun(id));
+      rows = rows.filter(([id]) => !inRun(id));
+      rows.splice(at, 0, ["num_1", { action: "passthrough", label: `${run.spots ? "Jump to input spot" : "Jump to tab"} 1–${k}`, rowLabel: `1 – ${k}`,
+        hold: run.save ? { action: "spot_capture", label: `Save the box as spot 1–${k}` } : undefined }]);
     }
     const vmap = variantsOf(prof);
     el.innerHTML = `
@@ -647,7 +726,7 @@ function renderInspector() {
         ${Object.keys(vmap).length ? `<div class="variant-row">${Object.entries(vmap).map(([vid, apps]) => `<button class="chip amber" data-editvariant="${vid}" title="Edit this variant">${esc(apps.map(appName).join(", "))} \u2192 variant</button>`).join("")}</div>` : ""}
       </div>
       <div class="insp-body">
-        ${rows.length ? `<div class="summary-list">${rows.map(([id, spec]) => `<button class="summary-row" data-pick="${id}"><span>${esc(spec.rowLabel || buttonLabel(id, r.id))}</span><b>${esc(spec.label || (spec.action === "passthrough" ? "Normal key" : actionName(spec)))}${gestureNote(spec) ? `<em>${esc(gestureNote(spec))}</em>` : ""}</b></button>`).join("")}</div>`
+        ${rows.length ? `<div class="summary-list">${rows.map(([id, spec]) => `<button class="summary-row" data-pick="${id}"><span>${esc(spec.rowLabel || buttonLabel(id, r.id))}</span><b>${esc(spec.label || (spec.action === "passthrough" ? "Normal key" : actionName(spec)))}${gestureRows(spec)}</b></button>`).join("")}</div>`
           : `<p class="empty-hint">${readOnly ? "Stock leaves every button exactly as the remote made it." : "Nothing mapped yet."}</p>`}
         <p class="empty-hint" style="margin-top:22px">Click a button on the remote \u2014 or simply <b>press it</b> \u2014 to choose what it does on a tap, a hold and a double-tap.
         ${readOnly ? "<br><br>Stock is read-only; picking an action creates your own copy." : ""}</p>
@@ -665,7 +744,7 @@ function renderInspector() {
 
   let notes = "";
   if (caps.dead) notes += `<p class="insp-note warn">This button is handled inside the remote (or by infrared) and never reaches the computer, so it can't be mapped.</p>`;
-  if (caps.tapOnly) notes += `<p class="insp-note">The Voice button sends one short pulse however long you hold it, so it has taps and double-taps but no hold.</p>`;
+  if (caps.tapOnly) notes += `<p class="insp-note${s.hold ? " warn" : ""}">This button reaches the computer as one short pulse however long you hold it${b.id === "menu" ? " (the remote keeps the long press for its own backlight)" : ""}, so it has a tap and a double-tap but no hold.${s.hold ? " Its hold action can never fire." : ""}</p>`;
   if (caps.osReads) notes += `<p class="insp-note amber">Windows reads this media/volume key straight from the remote, so it keeps doing its normal job even when remapped. Best left as is.</p>`;
   if (caps.needsLink) notes += S.state.interception.learning ? `<p class="insp-note warn">Restart Windows to finish installing the keyboard-key driver. Until then this key may not respond.</p>` : `<p class="insp-note amber">The keyboard-key driver is running but the ${esc(r.name)} was not identified \u2014 it was probably plugged in after startup. Restart Windows to include it.</p>`;
   if (caps.needsDriver) notes += `<p class="insp-note amber">This is an ordinary keyboard key. Its new action takes effect once the keyboard-key driver is installed \u2014 until then it keeps working as ${esc(caps.sig.key)}. <button class="linkish" data-goto="settings">How to install</button></p>`;
@@ -740,6 +819,13 @@ function paramEditor(slot, spec) {
       if (!spots.length) return `<div class="param"><label>Input spot</label><p class="empty-hint">No spots saved yet. <button class="linkish" data-goto="spots">Add input spots</button></p></div>`;
       return `<div class="param"><label>Input spot</label><select class="field" data-param="${slot}:spot">${spots.map((s, i) => `<option value="${i + 1}"${(spec.spot | 0) === i + 1 ? " selected" : ""}>${i + 1}. ${esc(s.label)}</option>`).join("")}</select></div>`;
     }
+    case "slot": {
+      // Which spot the box you're in becomes: a new one at the end, or a numbered one (replaced if it exists).
+      const spots = S.state.spots;
+      const opts = [`<option value="">A new spot at the end</option>`].concat([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) =>
+        `<option value="${n}"${(spec.spot | 0) === n ? " selected" : ""}>Spot ${n}${spots[n - 1] ? ` — replaces ${esc(spots[n - 1].label)}` : ""}</option>`));
+      return `<div class="param"><label>Save as</label><select class="field" data-param="${slot}:spot">${opts.join("")}</select></div>`;
+    }
     case "dir4": case "dir5": {
       const dirs = kind === "dir5" ? ["next", "left", "right", "up", "down"] : ["left", "right", "up", "down"];
       return `<div class="param"><label>Which screen</label><div class="seg">${dirs.map((d) => `<button data-dir="${slot}:${d}" class="${spec.dir === d ? "on" : ""}">${DIRS[d]}</button>`).join("")}</div></div>`;
@@ -760,7 +846,9 @@ $("#viewLive").addEventListener("change", (e) => {
   if (p) {
     const [slot, field] = p.split(":");
     const cur = slots()[slot] || {};
-    updateSpec(slot, { ...cur, [field]: field === "spot" ? +e.target.value : e.target.value });
+    const next = { ...cur, [field]: field === "spot" ? +e.target.value : e.target.value };
+    if (field === "spot" && !e.target.value) delete next.spot; // "a new spot at the end"
+    updateSpec(slot, next);
     return;
   }
   const kt = e.target.dataset.keystext;
@@ -942,7 +1030,11 @@ function renderProfiles() {
     </div>
     <div class="pgrid">
       ${choosable().map((p) => {
-        const maps = Object.entries(p.buttons);
+        // The selected remote's buttons, in the order they sit on it (the G10S's combined
+        // Home/Back key doesn't show up on a G20S list).
+        const rem = currentRemote(), order = (tplFor(rem.id)?.buttons || rem.buttons).map((b) => b.id);
+        const maps = Object.entries(p.buttons).filter(([id]) => order.includes(id))
+          .sort(([a], [b]) => order.indexOf(a) - order.indexOf(b));
         const live = usedOn(p.id);
         const ro = p.id === "stock";
         const vmap = variantsOf(p);
@@ -953,7 +1045,7 @@ function renderProfiles() {
           </div>
           <textarea class="pcard-desc" data-field="description" ${ro ? "readonly" : ""} spellcheck="false">${esc(p.description)}</textarea>
           <div class="pcard-maps">
-            ${maps.length ? maps.slice(0, 6).map(([id, spec]) => `<div><span>${esc(buttonLabel(id))}</span><b>${esc(spec.action === "passthrough" ? "Hold: " + actionName(spec.hold || spec.double) : actionName(spec))}</b></div>`).join("") : `<div><span>Every button</span><b>as the remote sends it</b></div>`}
+            ${maps.length ? maps.slice(0, 6).map(([id, spec]) => `<div><span>${esc(buttonLabel(id, rem.id))}</span><b>${esc(spec.action === "passthrough" ? "Normal key" : actionName(spec))}${gestureRows(spec)}</b></div>`).join("") : `<div><span>Every button</span><b>as the remote sends it</b></div>`}
             ${maps.length > 6 ? `<div><span></span><b>+${maps.length - 6} more</b></div>` : ""}
           </div>
           ${ro ? "" : `<div class="variants">
@@ -1303,6 +1395,11 @@ function renderSettings() {
         <p>Launch quietly into the tray when you sign in, with the profiles you last used.</p>
       </section>
       <section class="scard">
+        <h3>Double-tap speed</h3>
+        <p>How long Airdeck waits for a second press. Slower is easier to hit, but a single tap on a button that also has a double-tap takes that long to act.</p>
+        <div class="seg" id="dtap">${[[300, "Quick"], [400, "Normal"], [550, "Relaxed"]].map(([ms, name]) => `<button data-ms="${ms}" class="${S.state.doubleTapMs === ms ? "on" : ""}">${name} · ${ms} ms</button>`).join("")}</div>
+      </section>
+      <section class="scard">
         <h3>Administrator mode ${set.elevated ? `<span class="chip green">Running as admin</span>` : `<span class="chip">Standard</span>`}</h3>
         <p>Windows blocks keystrokes from reaching apps that run as administrator (an elevated terminal, for example) unless Airdeck runs as administrator too.</p>
         ${set.elevated ? "" : `<button class="btn" id="elevate"><span class="ic">\uE7EF</span>Restart as administrator</button>`}
@@ -1344,6 +1441,8 @@ function renderSettings() {
 $("#viewSettings").addEventListener("click", async (e) => {
   try {
     if (e.target.closest("#startup")) { S.state = await api("/api/settings", { startWithWindows: !S.state.settings.startWithWindows }); renderSettings(); toast(S.state.settings.startWithWindows ? "Airdeck will start with Windows" : "Won't start with Windows"); }
+    const dt = e.target.closest("#dtap [data-ms]");
+    if (dt) { S.state = await api("/api/settings", { doubleTapMs: +dt.dataset.ms }); renderSettings(); toast(`Double-tap window: ${S.state.doubleTapMs} ms`); }
     if (e.target.closest("#elevate")) { await api("/api/restart-admin", {}); toast("Approve the Windows prompt \u2014 Airdeck restarts as administrator"); }
     if (e.target.closest("#reload")) { S.state = await api("/api/reload", {}); renderAll(); }
     if (e.target.closest("#selftest")) { const t = await api("/api/selftest", {}); toast(`${t.hook} \u00B7 driver: ${t.interception} \u00B7 ${t.remotes.join(", ")}`, !/OK/.test(t.hook)); }

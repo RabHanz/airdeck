@@ -1,0 +1,56 @@
+{
+  "name": "Video calls",
+  "description": "Meetings from across the room. Uses Microsoft Teams shortcuts, and switches to the Zoom or Google Meet ones by itself when those are in front, so each button means the same thing everywhere: OK mutes / unmutes, Back turns the camera on / off, Pg+ raises your hand, Pg- shares your screen, hold DEL leaves the call. Home and Voice still dictate into the chat.",
+  "apps": {
+    "Zoom": "meetings-zoom",
+    "chrome": "meetings-meet",
+    "msedge": "meetings-meet",
+    "firefox": "meetings-meet",
+    "brave": "meetings-meet",
+    "opera": "meetings-meet",
+    "vivaldi": "meetings-meet",
+    "arc": "meetings-meet"
+  },
+  "buttons": {
+    "home": {
+      "action": "flow_ptt"
+    },
+    "home_back": {
+      "action": "flow_ptt"
+    },
+    "mic": {
+      "action": "flow_handsfree"
+    },
+    "ok": {
+      "action": "keys",
+      "keys": "ctrl+shift+m",
+      "label": "Mute / unmute"
+    },
+    "back": {
+      "action": "keys",
+      "keys": "ctrl+shift+o",
+      "label": "Camera on / off"
+    },
+    "page_up": {
+      "action": "keys",
+      "keys": "ctrl+shift+k",
+      "label": "Raise / lower hand"
+    },
+    "page_down": {
+      "action": "keys",
+      "keys": "ctrl+shift+e",
+      "label": "Share screen"
+    },
+    "del": {
+      "action": "passthrough",
+      "hold": {
+        "action": "keys",
+        "keys": "ctrl+shift+h",
+        "label": "Leave the call"
+      }
+    },
+    "menu": {
+      "action": "profile_next"
+    }
+  }
+}
