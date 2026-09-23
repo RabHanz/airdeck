@@ -190,6 +190,14 @@ class Controller : IDisposable
 
     void ShowNotice(string kind, string title, string detail) { if (Notice != null) Notice(kind, title, detail); }
 
+    // Newest write time of the app window's files: an open window reloads itself when this changes
+    // (after an update), so it never keeps running an old copy of the UI.
+    public string UiVersion()
+    {
+        var dir = new DirectoryInfo(Path.Combine(Root, "ui"));
+        return dir.Exists ? dir.GetFiles().Select(f => f.LastWriteTimeUtc.Ticks).DefaultIfEmpty(0).Max().ToString() : "0";
+    }
+
     string DataPath(string name) { return Path.Combine(Root, "data", name); }
     public string ProfilesDir { get { return Path.Combine(Root, "profiles"); } }
     public bool InterceptionActive { get { return interception != null && interception.Active; } }
@@ -888,6 +896,7 @@ class Controller : IDisposable
             { "templates", templates },
             { "paused", Paused },
             { "testMode", TestMode },
+            { "uiVersion", UiVersion() },
             { "spots", SpotList.Select(s => (object)s.ToJson()).ToList() },
             { "flow", new Dictionary<string, object> { { "ptt", Flow.Describe(Flow.Ptt) }, { "handsfree", Flow.Describe(Flow.HandsFree) }, { "command", Flow.Describe(Flow.Command) }, { "pasteLast", Flow.Describe(Flow.PasteLast) } } },
             { "interception", new Dictionary<string, object>
@@ -1246,6 +1255,7 @@ class TrayApp : ApplicationContext
     readonly Controller controller;
     readonly NotifyIcon tray;
     readonly ToastStack toasts = new ToastStack();
+    FileSystemWatcher uiWatcher;
     readonly HotkeyWindow hotkeys = new HotkeyWindow();
     readonly List<RegisteredWaitHandle> waits = new List<RegisteredWaitHandle>();
     readonly SynchronizationContext ui;
@@ -1269,6 +1279,14 @@ class TrayApp : ApplicationContext
         web.Start(47800);
         controller.Web = web;
         controller.Start();
+
+        // Tell open windows to reload when the UI files are updated in place.
+        uiWatcher = new FileSystemWatcher(Path.Combine(controller.Root, "ui")) { NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName };
+        var reloadTimer = new System.Windows.Forms.Timer { Interval = 800 };
+        reloadTimer.Tick += (s, e) => { reloadTimer.Stop(); web.Broadcast("reload", new Dictionary<string, object> { { "uiVersion", controller.UiVersion() } }); };
+        FileSystemEventHandler changed = (s, e) => ui.Post(_ => { reloadTimer.Stop(); reloadTimer.Start(); }, null);
+        uiWatcher.Changed += changed; uiWatcher.Created += changed; uiWatcher.Renamed += (s, e) => changed(s, e);
+        uiWatcher.EnableRaisingEvents = true;
 
         uint mods = Win32.MOD_CONTROL | Win32.MOD_ALT | Win32.MOD_SHIFT | Win32.MOD_NOREPEAT;
         if (!Win32.RegisterHotKey(hotkeys.Handle, HotExit, mods, (uint)Keys.F12)) Log.Write("Ctrl+Alt+Shift+F12 is taken by another app");

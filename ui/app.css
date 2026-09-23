@@ -514,3 +514,13 @@ select.field optgroup { color: var(--muted); font-style: normal; }
 .variant .row { flex-wrap: nowrap; }
 .stage-sub .chip { cursor: default; }
 .stage-sub button.chip { cursor: pointer; }
+
+/* Key copies next to callout labels */
+.callout .chip-r { fill: #231f18; stroke: var(--amber-line); stroke-width: 1.1; transition: fill .18s, stroke .18s; }
+.callout .chip-t { font: 600 15px var(--display); letter-spacing: .02em; fill: var(--amber-2); text-anchor: middle; dominant-baseline: central; }
+.callout .chip-g { font-family: var(--icons); font-size: 16px; fill: var(--amber-2); text-anchor: middle; dominant-baseline: central; }
+.callout .chip { opacity: 0; animation: fadeIn .5s var(--ease) .15s forwards; }
+.callout:hover .chip-r, .callout.sel .chip-r { fill: #3a2c12; stroke: var(--amber); }
+.callout .ca { font-size: 18px; }
+.callout .cb.gest { font-size: 13.5px; }
+.callout .cb.warn { font-size: 11.5px; }

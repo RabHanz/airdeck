@@ -200,11 +200,77 @@ function edgePoint(b, side, tpl) {
     return ring ? [b.x + s * ring.r, b.y] : [b.x + s * b.r, b.y];
   }
   if (b.shape === "rrect") return [b.x + s * b.w / 2, b.y];
-  if (DPAD[b.shape] !== undefined) {
+  if (DPAD[b.shape] !== undefined || b.shape === "band") {
     const dy = gy - b.y;
     return [b.x + s * Math.sqrt(Math.max(0, b.r * b.r - dy * dy)), gy];
   }
   return [gx, gy];
+}
+
+// Ring-shaped keys (d-pad segments, Back / Home arcs) can start their line anywhere along their
+// outer edge: pick the point level with the label so the line stays perfectly horizontal.
+function ringStart(b, side, ly) {
+  let a0, a1;
+  if (DPAD[b.shape] !== undefined) { a0 = DPAD[b.shape] + 8; a1 = DPAD[b.shape] + 82; }
+  else if (b.shape === "band") { a0 = b.a0 + 6; a1 = b.a1 - 6; }
+  else return null;
+  const k = (ly - b.y) / b.r;
+  if (Math.abs(k) > 0.98) return null;
+  const phi = Math.asin(k) * 180 / Math.PI;
+  const theta = side === "L" ? 180 - phi : (phi + 360) % 360;
+  const inRange = [theta, theta + 360, theta - 360].some((t) => t >= a0 && t <= a1);
+  return inRange ? pt(b.x, b.y, b.r, theta) : null;
+}
+
+function inRingKey(o, x, y) {
+  let a0, a1;
+  if (DPAD[o.shape] !== undefined) { a0 = DPAD[o.shape] + 2; a1 = DPAD[o.shape] + 88; }
+  else if (o.shape === "band") { a0 = o.a0; a1 = o.a1; }
+  else return false;
+  const d = Math.hypot(x - o.x, y - o.y);
+  if (d < o.r2 || d > o.r) return false;
+  const t = (Math.atan2(y - o.y, x - o.x) * 180 / Math.PI + 360) % 360;
+  return [t, t + 360].some((v) => v >= a0 && v <= a1);
+}
+
+// True when a level line from (x, y) out to the remote's edge would run over another ring key.
+function levelCrosses(tpl, self, x, y, side) {
+  const end = side === "L" ? 0 : tpl.width;
+  for (let px = x + (side === "L" ? -3 : 3); side === "L" ? px > end : px < end; px += side === "L" ? -3 : 3)
+    if (tpl.buttons.some((o) => o !== self && inRingKey(o, px, y))) return true;
+  return false;
+}
+
+// Axis-aligned box of a key (plus its caption), used to see whether a straight line would cross it.
+function keyBox(b) {
+  if (b.shape === "rrect") return { x0: b.x - b.w / 2, x1: b.x + b.w / 2, y0: b.y - b.h / 2, y1: b.y + b.h / 2 };
+  if (b.shape === "circle") return { x0: b.x - b.r, x1: b.x + b.r, y0: b.y - b.r, y1: b.y + b.r + (b.glyph ? 14 : 0) };
+  return null; // ring parts: a line leaving the ring's outer edge never crosses them
+}
+
+// A key boxed in on that side (OK inside the ring, Down under the Back / Home arcs, Voice between
+// the volume keys, 0 between DEL and Menu) gets no line: its label carries a copy of the key instead.
+function lineBlocked(b, side, tpl, ex, ey) {
+  if (b.shape === "circle" && tpl.buttons.some((o) => DPAD[o.shape] !== undefined && Math.hypot(o.x - b.x, o.y - b.y) < 2)) return true;
+  if (levelCrosses(tpl, b, ex, ey, side)) return true; // e.g. Down: any level line runs over Back or Home
+  const pad = 4;
+  return tpl.buttons.some((o) => {
+    if (o === b) return false;
+    const k = keyBox(o);
+    if (!k || ey < k.y0 - pad || ey > k.y1 + pad) return false;
+    return side === "L" ? k.x1 <= ex + 1 : k.x0 >= ex - 1;
+  });
+}
+
+// Small copy of the key itself, shown next to its label.
+function keyChip(b) {
+  return b.glyph ? { glyph: glyphChar(b.glyph), w: 32 } : (() => { const t = b.text || b.label; return { text: t, w: Math.max(32, t.length * 9.4 + 16) }; })();
+}
+
+function chipSvg(chip, x, y) {
+  const inner = chip.glyph ? `<text class="chip-g" x="${x + chip.w / 2}" y="${y + 1}">${chip.glyph}</text>`
+    : `<text class="chip-t" x="${x + chip.w / 2}" y="${y + 1}">${esc(chip.text)}</text>`;
+  return `<rect class="chip-r" x="${x}" y="${y - 14}" width="${chip.w}" height="28" rx="7"/>${inner}`;
 }
 
 function gestureNote(spec) {
@@ -232,59 +298,100 @@ function remoteSvg(remote, tpl, profile) {
     return `<g class="${cls}" data-b="${b.id}">${title}${shapeSvg(b)}${label}${cap}</g>`;
   }).join("");
 
-  // Number pad: when 1-9 all do "the same thing for n", draw one bracket instead of nine callouts.
+  // Number pad: when 1-9 all do "the same thing for n", one bracket stands for all nine.
+  // Otherwise the digits are listed in order (1-5 on the left, 6-0 on the right) with a copy of
+  // each key, instead of nine lines fanning out from a grid.
   const digits = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => tpl.buttons.find((b) => b.id === `num_${n}`));
   let group = null;
   if (digits.every(Boolean)) {
     const specs = digits.map((b) => specOf(b.id));
-    const spotRun = specs.every((s, i) => s && s.action === "spot_goto" && (s.spot | 0) === i + 1);
-    const ctrlRun = specs.every((s, i) => s && s.action === "keys" && s.keys === `ctrl+${i + 1}`);
-    if (spotRun || ctrlRun) group = { ids: digits.map((b) => b.id), text: spotRun ? "Jump to input spot 1\u20139" : "Jump to tab 1\u20139" };
+    const plain = (s) => s && !s.hold && !s.double;
+    const spotRun = specs.every((s, i) => plain(s) && s.action === "spot_goto" && (s.spot | 0) === i + 1);
+    const ctrlRun = specs.every((s, i) => plain(s) && s.action === "keys" && s.keys === `ctrl+${i + 1}`);
+    if (spotRun || ctrlRun) group = { ids: digits.map((b) => b.id), text: spotRun ? "Jump to input spot 1–9" : "Jump to tab 1–9" };
   }
 
   const items = tpl.buttons
     .filter((b) => mapped(b.id) && !buttonCaps(remote, b.id).dead && !(group && group.ids.includes(b.id)))
-    .map((b) => ({ b, y: glyphCenter(b)[1], x: glyphCenter(b)[0] }));
+    .map((b) => ({ b, x: glyphCenter(b)[0], y: glyphCenter(b)[1], spec: specOf(b.id) }));
 
-  // Row-aware sides: left half -> left column, right half -> right column; centre keys take
-  // whichever side is free on their row, so pairs like Pg+/Pg- mirror each other.
-  const rowKey = (y) => Math.round(y / 16);
-  for (const it of items) it.side = it.x < W / 2 - 14 ? "L" : it.x > W / 2 + 14 ? "R" : null;
-  let lastTie = "R";
-  for (const it of items.filter((i) => !i.side).sort((a, b) => a.y - b.y)) {
-    const row = items.filter((o) => o !== it && o.side && rowKey(o.y) === rowKey(it.y));
-    const l = row.filter((o) => o.side === "L").length, r = row.filter((o) => o.side === "R").length;
-    if (l !== r) { it.side = l < r ? "L" : "R"; continue; }
-    // Free on both sides: go where fewer labels sit near this height, alternating on a tie, so the
-    // d-pad's centre keys spread over both columns instead of piling up on one.
-    const near = (s) => items.filter((o) => o !== it && o.side === s && Math.abs(o.y - it.y) <= 70).length;
-    const nl = near("L"), nr = near("R");
-    it.side = nl !== nr ? (nl < nr ? "L" : "R") : (lastTie = lastTie === "L" ? "R" : "L");
-  }
-
-  const GAP = 44;
-  const callouts = [];
-  for (const side of ["L", "R"]) {
-    const list = items.filter((i) => i.side === side).sort((a, b) => a.y - b.y);
-    let prev = -Infinity;
-    for (const it of list) { it.ly = Math.max(it.y, prev + GAP); prev = it.ly; }
-    let next = H - 30;
-    for (const it of [...list].reverse()) { it.ly = Math.min(it.ly, next); next = it.ly - GAP; }
-    list.forEach((it, n) => callouts.push(calloutSvg(remote, tpl, it, side, n, specOf(it.b.id), W)));
-  }
-
-  let groupSvg = "";
   if (group) {
     const bs = group.ids.map((id) => tpl.buttons.find((b) => b.id === id));
     const top = Math.min(...bs.map((b) => b.y - b.h / 2)), bottom = Math.max(...bs.map((b) => b.y + b.h / 2));
     const left = Math.min(...bs.map((b) => b.x - b.w / 2));
-    const mid = (top + bottom) / 2, bx = left - 12;
-    const sel = group.ids.includes(S.selected) ? " sel" : "";
-    groupSvg = `<g class="callout group${sel}" data-b="num_1">
-      <path class="halo" d="M${bx + 6},${top} H${bx} V${bottom} H${bx + 6} M${bx},${mid} H-58"/>
-      <path d="M${bx + 6},${top} H${bx} V${bottom} H${bx + 6} M${bx},${mid} H-58"/>
-      <text class="ca" x="-66" y="${mid - 3}" text-anchor="end">${esc(group.text)}</text>
-      <text class="cb" x="-66" y="${mid + 13}" text-anchor="end">1 \u2013 9 \u00B7 press</text></g>`;
+    items.push({ group, b: { id: "num_1", text: "1–9" }, x: left, y: (top + bottom) / 2, top, bottom, side: "L", spec: specOf("num_1") });
+  }
+
+  // Digits listed in order when they don't form one run.
+  const listed = ["num_1", "num_2", "num_3", "num_4", "num_5", "num_6", "num_7", "num_8", "num_9", "num_0"]
+    .map((id) => items.find((it) => it.b.id === id)).filter(Boolean);
+  if (!group && listed.length > 1) {
+    // Centred on the 1-9 grid so the keys around it (DEL, Menu) keep straight lines.
+    const grid = listed.filter((it) => it.b.id !== "num_0").map((it) => it.y);
+    const half = Math.ceil(listed.length / 2), step = 38;
+    const start = (Math.min(...grid) + Math.max(...grid)) / 2 - ((half - 1) * step) / 2 - 4;
+    listed.forEach((it, i) => {
+      it.list = true;
+      it.side = i < half ? "L" : "R";
+      it.y = start + (i < half ? i : i - half) * step;
+    });
+  }
+
+  // Sides: left half -> left column, right half -> right column; a centre key takes the side that
+  // is free on its row, else the one with fewer labels near its height (alternating on a tie).
+  const rowKey = (y) => Math.round(y / 16);
+  for (const it of items) if (!it.side) it.side = it.x < W / 2 - 14 ? "L" : it.x > W / 2 + 14 ? "R" : null;
+  // Keys with a line choose first; keys that get no line (boxed in on both sides) can sit
+  // anywhere, so they fill in last where there is room.
+  const free = (it) => !(lineBlocked(it.b, "L", tpl, ...edgePoint(it.b, "L", tpl)) && lineBlocked(it.b, "R", tpl, ...edgePoint(it.b, "R", tpl)));
+  let lastTie = "R";
+  for (const it of items.filter((i) => !i.side).sort((a, b) => (free(b) - free(a)) || a.y - b.y)) {
+    const row = items.filter((o) => o !== it && o.side && !o.list && rowKey(o.y) === rowKey(it.y));
+    const l = row.filter((o) => o.side === "L").length, r = row.filter((o) => o.side === "R").length;
+    if (l !== r) { it.side = l < r ? "L" : "R"; continue; }
+    const near = (s) => items.filter((o) => o !== it && o.side === s && Math.abs(o.y - it.y) <= 70).length;
+    const total = (s) => items.filter((o) => o !== it && o.side === s).length;
+    const nl = near("L"), nr = near("R"), tl = total("L"), tr = total("R");
+    if (nl !== nr) it.side = nl < nr ? "L" : "R";
+    else if (!free(it) && tl !== tr) it.side = tl < tr ? "L" : "R"; // line-less keys even out the columns
+    else it.side = lastTie = lastTie === "L" ? "R" : "L";
+  }
+
+  const callouts = [];
+  for (const side of ["L", "R"]) {
+    const list = items.filter((i) => i.side === side);
+    for (const it of list) {
+      it.twoLine = !!(gestureNote(it.spec) || calloutWarning(remote, it.b.id, it.spec));
+      it.below = it.twoLine ? 30 : 14;
+      if (!it.group && !it.list) it.y = edgePoint(it.b, side, tpl)[1];
+    }
+    // A listed digit block stays together: other labels that fall inside it move below it.
+    const block = list.filter((i) => i.list);
+    if (block.length) {
+      const b0 = Math.min(...block.map((i) => i.y)), b1 = Math.max(...block.map((i) => i.y));
+      for (const it of list) if (!it.list && it.y >= b0 - 20 && it.y <= b1) it.y = b1 + 1;
+    }
+    // Labels with a line are stacked first, as level with their key as they can be (each label
+    // spans 14 above its line to 14 or 30 below). Labels without a line then take the nearest free
+    // gap, so they never push a lined label out of level.
+    const GAP = 10;
+    const lineless = list.filter((it) => !it.group && !it.list && lineBlocked(it.b, side, tpl, ...edgePoint(it.b, side, tpl)));
+    const fixed = list.filter((it) => !lineless.includes(it)).sort((a, b) => a.y - b.y);
+    let prev = null;
+    for (const it of fixed) { it.ly = prev ? Math.max(it.y, prev.ly + prev.below + 14 + GAP) : it.y; prev = it; }
+    let next = null;
+    for (const it of [...fixed].reverse()) { it.ly = next ? Math.min(it.ly, next.ly - it.below - 14 - GAP) : Math.min(it.ly, H - 24 - it.below); next = it; }
+    const placed = [...fixed];
+    for (const f of lineless.sort((a, b) => a.y - b.y)) {
+      const fits = (y) => y - 14 >= -8 && y + f.below <= H - 8 &&
+        placed.every((o) => (y >= o.ly ? y - o.ly >= o.below + 14 + GAP : o.ly - y >= f.below + 14 + GAP));
+      let at = null;
+      for (let d = 0; d <= 260 && at === null; d += 2) at = fits(f.y + d) ? f.y + d : fits(f.y - d) ? f.y - d : null;
+      f.ly = at !== null ? at : Math.max(...placed.map((o) => o.ly + o.below)) + 14 + GAP;
+      placed.push(f);
+    }
+    list.sort((a, b) => a.ly - b.ly);
+    list.forEach((it, n) => callouts.push(calloutSvg(remote, tpl, it, side, n, W)));
   }
 
   const dots = (tpl.dots || []).map((d) => `<circle class="rdot" cx="${d.x}" cy="${d.y}" r="3"/>`).join("");
@@ -300,45 +407,60 @@ function remoteSvg(remote, tpl, profile) {
     <path class="rsheen" d="${roundRectPath(0, 0, W, H, tpl.topCorner, tpl.bottomCorner)}"/>
     ${dots}
     <text class="rbrand" x="${W / 2}" y="${H - 38}">${esc(remote.name)}</text>
-    ${callouts.join("")}${groupSvg}
+    ${callouts.join("")}
     ${keys}
   </svg>`;
 }
 
-function calloutSvg(remote, tpl, it, side, n, spec, W) {
-  const L = side === "L";
-  const [ex, ey] = edgePoint(it.b, side, tpl);
-  const col = L ? -22 : W + 22, bend = L ? -40 : W + 40, tx = L ? -48 : W + 48;
-  // Straight across when the label shares the key's row; otherwise one clean bend near the column.
-  // A key with a neighbour in the way (0 between DEL and Menu) drops below its row first instead
-  // of disappearing behind the neighbour.
-  const b = it.b, end = tx + (L ? 4 : -4);
-  const blocked = b.shape === "rrect" && tpl.buttons.some((o) => o !== b && Math.abs(o.y - b.y) < 4 && (L ? o.x < b.x : o.x > b.x));
-  let d, dot = [ex, ey];
-  if (blocked) {
-    const under = b.y + b.h / 2 + 9;
-    dot = [b.x, b.y + b.h / 2];
-    d = `M${b.x},${dot[1]} V${under} H${col} L${bend},${it.ly} H${end}`;
-  } else d = Math.abs(it.ly - ey) < 1 ? `M${ex},${ey} H${end}` : `M${ex},${ey} H${col} L${bend},${it.ly} H${end}`;
-  const caps = buttonCaps(remote, it.b.id);
+function calloutWarning(remote, id, spec) {
+  const caps = buttonCaps(remote, id);
   const info = ACTION_INFO[spec.action] || {};
-  let trig = spec.action === "passthrough" ? "tap = normal" : info.hold && spec.action !== "keys" ? "hold" : "press", warn = false;
-  if (caps.needsDriver) { trig = "needs driver"; warn = true; }
-  else if (caps.needsLink) { trig = S.state.interception.learning ? "restart windows" : "not identified"; warn = true; }
-  else if (caps.tapOnly && info.hold) { trig = "tap-only button"; warn = true; }
-  else if (caps.osReads) { trig = "windows also reacts"; warn = true; }
-  const gest = gestureNote(spec);
-  // A key that works as usual when tapped and only gains a hold / double-tap reads like the rest:
-  // what a tap does on top, the gestures underneath.
-  const title = spec.action === "passthrough" ? "Normal key" : actionName(spec);
-  const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + "\u2026" : s);
-  const delay = (n * 0.05).toFixed(2);
+  if (caps.needsDriver) return "needs driver";
+  if (caps.needsLink) return S.state.interception.learning ? "restart windows" : "not identified";
+  if (caps.tapOnly && info.hold) return "tap-only button";
+  if (caps.osReads) return "windows also reacts";
+  return "";
+}
+
+// One label: a copy of the key, what a tap does, and (smaller) its hold / double-tap or a warning.
+// Lines are always one straight stroke from the key's outer edge to the label; keys boxed in by
+// their neighbours get no line and are recognised by the key copy instead.
+function calloutSvg(remote, tpl, it, side, n, W) {
+  const L = side === "L", spec = it.spec;
+  const chip = it.group ? { text: "1–9", w: 46 } : keyChip(it.b);
+  // Text sits in a fixed column so every title lines up; the key copy sits against the text and
+  // the line runs from the key to the copy.
+  const tx = L ? -74 : W + 74;
+  const chipX = L ? tx + 10 : tx - 10 - chip.w;
   const anchor = L ? "end" : "start";
-  return `<g class="callout${S.selected === it.b.id ? " sel" : ""}" data-b="${it.b.id}">
-    <path class="halo" d="${d}" style="animation-delay:${delay}s"/><path d="${d}" style="animation-delay:${delay}s"/>
-    <circle cx="${dot[0]}" cy="${dot[1]}" r="3"/>
-    <text class="ca" x="${tx}" y="${it.ly - 3}" text-anchor="${anchor}" style="animation-delay:${(0.2 + n * 0.05).toFixed(2)}s">${esc(clip(title, 30))}</text>
-    <text class="cb${warn ? " warn" : ""}${gest && !warn ? " gest" : ""}" x="${tx}" y="${it.ly + 13}" text-anchor="${anchor}" style="animation-delay:${(0.25 + n * 0.05).toFixed(2)}s">${esc(warn || !gest ? it.b.label + " \u00B7 " + trig : clip(gest, 46))}</text>
+  const ly = it.ly, lineEnd = L ? chipX + chip.w + 5 : chipX - 5;
+
+  let line = "";
+  if (it.group) {
+    const bx = it.x - 12;
+    const d = `M${bx + 6},${it.top} H${bx} V${it.bottom} H${bx + 6} M${bx},${it.y} L${lineEnd},${ly}`;
+    line = `<path class="halo" d="${d}"/><path d="${d}"/>`;
+  } else if (!it.list) {
+    let [ex, ey] = edgePoint(it.b, side, tpl);
+    if (!lineBlocked(it.b, side, tpl, ex, ey)) {
+      const level = Math.abs(ly - ey) > 1 && ringStart(it.b, side, ly);
+      if (level && !levelCrosses(tpl, it.b, level[0], level[1], side)) [ex, ey] = level;
+      const d = `M${ex},${ey} L${lineEnd},${ly}`;
+      line = `<path class="halo" d="${d}"/><path d="${d}"/><circle cx="${ex}" cy="${ey}" r="3"/>`;
+    }
+  }
+
+  const warn = calloutWarning(remote, it.b.id, spec);
+  const gest = gestureNote(spec);
+  const title = it.group ? it.group.text : spec.action === "passthrough" ? "Normal key" : actionName(spec);
+  const clip = (s, k) => (s.length > k ? s.slice(0, k - 1) + "…" : s);
+  const sub = warn || gest;
+  const delay = (0.2 + n * 0.05).toFixed(2);
+  return `<g class="callout${S.selected === it.b.id || (it.group && it.group.ids.includes(S.selected)) ? " sel" : ""}" data-b="${it.b.id}">
+    ${line}
+    <g class="chip">${chipSvg(chip, chipX, ly)}</g>
+    <text class="ca" x="${tx}" y="${ly + 6}" text-anchor="${anchor}" style="animation-delay:${delay}s">${esc(clip(title, 30))}</text>
+    ${sub ? `<text class="cb${warn ? " warn" : " gest"}" x="${tx}" y="${ly + 25}" text-anchor="${anchor}" style="animation-delay:${delay}s">${esc(clip(sub, 46))}</text>` : ""}
   </g>`;
 }
 
@@ -503,7 +625,10 @@ function renderInspector() {
   const readOnly = prof.id === "stock";
 
   if (!S.selected || !tpl) {
-    let rows = Object.entries(prof.buttons).filter(([id]) => r.buttons.some((b) => b.id === id));
+    // In the order the keys sit on the remote, top to bottom.
+    const order = (tpl ? tpl.buttons : r.buttons).map((b) => b.id);
+    let rows = Object.entries(prof.buttons).filter(([id]) => r.buttons.some((b) => b.id === id))
+      .sort(([a], [b]) => (order.indexOf(a) + 1 || 999) - (order.indexOf(b) + 1 || 999));
     // 1-9 doing "the same thing for n" read as one row, like the bracket on the drawing.
     const digitSpecs = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => prof.buttons[`num_${n}`]);
     const spotRun = digitSpecs.every((s, i) => s && s.action === "spot_goto" && (s.spot | 0) === i + 1 && !s.hold && !s.double);
@@ -1262,6 +1387,15 @@ function renderAll() {
 async function boot() {
   try {
     S.state = await api("/api/state");
+    S.uiVersion = S.state.uiVersion;
+    const showRemote = new URLSearchParams(location.search).get("remote"); // for screenshots
+    if (showRemote && S.state.remotes.some((x) => x.id === showRemote)) S.remote = showRemote;
+    const showProfile = new URLSearchParams(location.search).get("profile"); // for screenshots
+    if (showProfile && profileById(showProfile)) {
+      // Render as if the remote were running it (no "not active" banner in screenshots).
+      const rr = remoteById(S.remote) || S.state.remotes.find((x) => x.connected) || S.state.remotes[0];
+      if (rr) { rr.profile = rr.baseProfile = showProfile; rr.autoApp = null; }
+    }
     renderAll();
     const hash = location.hash.slice(1);
     if (["live", "profiles", "spots", "test", "settings"].includes(hash)) showView(hash);
@@ -1275,7 +1409,13 @@ async function boot() {
   const events = new EventSource("/api/events");
   // After Airdeck restarts the stream reconnects on its own; resync so nothing is stale.
   let opened = false;
-  events.onopen = async () => { if (opened) { S.state = await api("/api/state"); renderAll(); } opened = true; };
+  // Airdeck was updated while this window was open: load the new UI instead of running the old one.
+  const stale = (v) => v && S.uiVersion && v !== S.uiVersion;
+  events.onopen = async () => {
+    if (opened) { S.state = await api("/api/state"); if (stale(S.state.uiVersion)) return location.reload(); renderAll(); }
+    opened = true;
+  };
+  events.addEventListener("reload", (e) => { if (stale(JSON.parse(e.data).uiVersion)) location.reload(); });
   events.addEventListener("press", (e) => onPress(JSON.parse(e.data)));
   events.addEventListener("spot", (e) => flashSpot(JSON.parse(e.data).index));
   let pending = null;
