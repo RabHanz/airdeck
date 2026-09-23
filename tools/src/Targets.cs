@@ -82,6 +82,29 @@ static class Spots
         return sb.ToString();
     }
 
+    public static string FriendlyName(string process) { return FriendlyApp(process); }
+
+    // Switchable app windows, most recently used first (skips cloaked/background windows like
+    // Settings stubs and windows on other virtual desktops, which Windows reports as cloaked).
+    public static List<IntPtr> AppWindows()
+    {
+        var list = new List<IntPtr>();
+        foreach (var h in TopWindows())
+        {
+            if (GetWindow(h, 4) != IntPtr.Zero) continue; // GW_OWNER: dialogs/tool windows belong to another
+            int cloaked;
+            if (DwmGetWindowAttribute(h, 14, out cloaked, 4) == 0 && cloaked != 0) continue; // DWMWA_CLOAKED
+            string p = ProcessName(h);
+            if (p == "" || p.Equals("explorer", StringComparison.OrdinalIgnoreCase) && Title(h) == "Program Manager") continue;
+            if (p.Equals("msedge", StringComparison.OrdinalIgnoreCase) && Title(h) == "Airdeck") continue;
+            list.Add(h);
+        }
+        return list;
+    }
+
+    [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr h, uint cmd);
+    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int attr, out int value, int size);
+
     static string FriendlyApp(string process)
     {
         switch (process.ToLowerInvariant())
@@ -93,6 +116,16 @@ static class Spots
             case "windowsterminal": return "Terminal";
             case "claude": return "Claude";
             case "cursor": return "Cursor";
+            case "explorer": return "File Explorer";
+            case "notepad": return "Notepad";
+            case "spotify": return "Spotify";
+            case "slack": return "Slack";
+            case "discord": return "Discord";
+            case "powerpnt": return "PowerPoint";
+            case "winword": return "Word";
+            case "excel": return "Excel";
+            case "outlook": case "olk": return "Outlook";
+            case "t3code": case "t3 code": return "T3 Code";
             default: return process;
         }
     }

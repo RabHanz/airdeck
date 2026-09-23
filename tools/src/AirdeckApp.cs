@@ -18,10 +18,15 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
+// A profile maps button ids to actions. It may "extend" another profile (inheriting every
+// mapping it does not override) and name per-app variants that take over while an app is in front.
 class Profile
 {
-    public string Id, Name, Description;
-    public Dictionary<string, Dictionary<string, object>> Buttons = new Dictionary<string, Dictionary<string, object>>();
+    public string Id, Name, Description, Extends;
+    public bool Hidden; // per-app variants: not offered in the profile switcher
+    public Dictionary<string, Dictionary<string, object>> Own = new Dictionary<string, Dictionary<string, object>>();
+    public Dictionary<string, Dictionary<string, object>> Buttons = new Dictionary<string, Dictionary<string, object>>(); // resolved
+    public Dictionary<string, string> Apps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // process -> profile id
 
     public static Profile Load(string path)
     {
@@ -31,6 +36,8 @@ class Profile
             Id = Path.GetFileNameWithoutExtension(path),
             Name = d.ContainsKey("name") ? (string)d["name"] : Path.GetFileNameWithoutExtension(path),
             Description = d.ContainsKey("description") ? (string)d["description"] : "",
+            Extends = d.ContainsKey("extends") ? d["extends"] as string : null,
+            Hidden = d.ContainsKey("hidden") && d["hidden"] is bool && (bool)d["hidden"],
         };
         object b;
         if (d.TryGetValue("buttons", out b) && b is Dictionary<string, object>)
@@ -39,16 +46,54 @@ class Profile
                 var spec = kv.Value as Dictionary<string, object>;
                 if (kv.Key.StartsWith("_") || spec == null) continue;
                 RemoteAction.Create(spec); // validate now so a typo is reported at load time
-                p.Buttons[kv.Key] = spec;
+                p.Own[kv.Key] = spec;
             }
+        if (d.TryGetValue("apps", out b) && b is Dictionary<string, object>)
+            foreach (var kv in (Dictionary<string, object>)b)
+                if (kv.Value is string) p.Apps[kv.Key] = (string)kv.Value;
         return p;
+    }
+
+    // Flatten inheritance: parent mappings first, then this profile's own (a "passthrough" own entry
+    // restores the button's normal behaviour even if the parent mapped it).
+    public static void Resolve(List<Profile> all)
+    {
+        var byId = all.ToDictionary(p => p.Id);
+        var done = new HashSet<string>();
+        Action<Profile, int> resolve = null;
+        resolve = (p, depth) =>
+        {
+            if (done.Contains(p.Id)) return;
+            p.Buttons = new Dictionary<string, Dictionary<string, object>>();
+            Profile parent;
+            if (p.Extends != null && depth < 8 && byId.TryGetValue(p.Extends, out parent) && parent != p)
+            {
+                resolve(parent, depth + 1);
+                foreach (var kv in parent.Buttons) p.Buttons[kv.Key] = kv.Value;
+            }
+            foreach (var kv in p.Own)
+            {
+                if ((kv.Value["action"] as string) == "passthrough" && !kv.Value.ContainsKey("hold") && !kv.Value.ContainsKey("double")) p.Buttons.Remove(kv.Key);
+                else p.Buttons[kv.Key] = kv.Value;
+            }
+            done.Add(p.Id);
+        };
+        foreach (var p in all) resolve(p, 0);
     }
 
     public Dictionary<string, object> ToJson()
     {
         var buttons = new Dictionary<string, object>();
         foreach (var kv in Buttons) buttons[kv.Key] = kv.Value;
-        return new Dictionary<string, object> { { "id", Id }, { "name", Name }, { "description", Description }, { "buttons", buttons } };
+        var own = new Dictionary<string, object>();
+        foreach (var kv in Own) own[kv.Key] = kv.Value;
+        var apps = new Dictionary<string, object>();
+        foreach (var kv in Apps) apps[kv.Key] = kv.Value;
+        return new Dictionary<string, object>
+        {
+            { "id", Id }, { "name", Name }, { "description", Description }, { "extends", Extends }, { "hidden", Hidden },
+            { "buttons", buttons }, { "own", own }, { "apps", apps },
+        };
     }
 }
 
@@ -68,7 +113,9 @@ class RemoteDef
     public string HardwareTag { get { return string.Format("VID_{0:X4}&PID_{1:X4}", Vid, Pid); } }
 
     // Runtime state
-    public Profile Profile;
+    public Profile Profile;          // the profile in effect right now
+    public string BaseProfileId;     // the profile the user chose (app rules may temporarily override it)
+    public string AutoApp;           // app whose rule is overriding the chosen profile, if any
     public Dictionary<string, RemoteAction> Actions = new Dictionary<string, RemoteAction>();
     public bool Connected;
     public double LastUsedMs;
@@ -91,8 +138,10 @@ class Controller : IDisposable
     public List<Profile> Profiles = new List<Profile>();
     public List<InputSpot> SpotList = new List<InputSpot>();
     public bool Paused;
+    public bool TestMode;            // dry run: mapped buttons are recognised and reported, but no action runs
     public event Action Changed;
     public event Action<string> Notify;
+    public event Action<string, string, string> Notice; // corner toast: kind (same kind replaces in place), title, detail
     public WebServer Web;
     public SynchronizationContext Ui;
 
@@ -119,7 +168,27 @@ class Controller : IDisposable
         LoadSpots();
         Workflow.Step = StepSpot;
         Workflow.Goto = JumpSpot;
+        Workflow.Capture = () => Task.Run(() =>
+        {
+            try { CaptureSpot(); }
+            catch (Exception ex) { Ui.Post(_ => Raise("Could not save the input: " + ex.Message), null); }
+        });
+        Workflow.DesktopSwitched = d => Task.Run(() =>
+        {
+            Thread.Sleep(250); // let Windows finish the switch before reading which desktop is current
+            var info = VirtualDesktops.Current();
+            Ui.Post(_ => ShowNotice("desktop", info != null ? info.Item1 : (d > 0 ? "Next desktop →" : "← Previous desktop"), info != null ? info.Item2 : ""), null);
+        });
+        Workflow.NextProfile = () => { var r = FocusRemote; if (r != null) CycleProfile(r); };
+        Workflow.SwitchApp = SwitchApp;
+        Workflow.Screen = (what, dir) =>
+        {
+            var result = what == "move" ? Screens.MoveWindow(dir) : Screens.Focus(dir);
+            ShowNotice("screen", result.Item1, result.Item2);
+        };
     }
+
+    void ShowNotice(string kind, string title, string detail) { if (Notice != null) Notice(kind, title, detail); }
 
     string DataPath(string name) { return Path.Combine(Root, "data", name); }
     public string ProfilesDir { get { return Path.Combine(Root, "profiles"); } }
@@ -186,7 +255,8 @@ class Controller : IDisposable
             }
         }
         if (!list.Any(p => p.Id == "stock")) list.Insert(0, new Profile { Id = "stock", Name = "Stock", Description = "Default remote behaviour." });
-        Profiles = list.OrderBy(p => p.Id == "stock" ? 0 : 1).ThenBy(p => p.Name).ToList();
+        Profile.Resolve(list);
+        Profiles = list.OrderBy(p => p.Id == "stock" ? 0 : 1).ThenBy(p => p.Hidden ? 1 : 0).ThenBy(p => p.Name).ToList();
         foreach (var r in Remotes) ApplyProfile(r, r.Profile == null ? "stock" : r.Profile.Id);
         Log.Write("loaded profiles: {0}", string.Join(", ", Profiles.Select(p => p.Id)));
     }
@@ -202,7 +272,7 @@ class Controller : IDisposable
                 foreach (var kv in (Dictionary<string, object>)profiles)
                 {
                     var r = Remotes.FirstOrDefault(x => x.Id == kv.Key);
-                    if (r != null) ApplyProfile(r, (string)kv.Value);
+                    if (r != null) { ApplyProfile(r, (string)kv.Value); r.BaseProfileId = r.Profile.Id; }
                 }
             Paused = d.ContainsKey("paused") && (bool)d["paused"];
         }
@@ -212,7 +282,7 @@ class Controller : IDisposable
     void SaveState()
     {
         var profiles = new Dictionary<string, object>();
-        foreach (var r in Remotes) profiles[r.Id] = r.Profile.Id;
+        foreach (var r in Remotes) profiles[r.Id] = r.BaseProfileId ?? r.Profile.Id;
         WriteData("state.json", new Dictionary<string, object> { { "profiles", profiles }, { "paused", Paused } });
     }
 
@@ -253,6 +323,10 @@ class Controller : IDisposable
             try
             {
                 var action = RemoteAction.Create(kv.Value);
+                // "Normal key on tap, something else on hold": the gesture has to swallow the press to
+                // time it, so a plain tap replays the button's own key.
+                var gesture = action as GestureAction;
+                if (gesture != null && gesture.Tap == null) gesture.Tap = OriginalKey(r.Buttons.First(b => b.Id == kv.Key));
                 if (action != null) actions[kv.Key] = action;
             }
             catch (FormatException ex) { Log.Write("{0}/{1}: {2}", p.Id, kv.Key, ex.Message); }
@@ -260,18 +334,88 @@ class Controller : IDisposable
         r.Actions = actions;
     }
 
+    static RemoteAction OriginalKey(ButtonSig sig)
+    {
+        ushort vk = 0;
+        if (sig.Source == "keyboard") vk = sig.Vk;
+        else if (sig.Source == "consumer") consumerVk.TryGetValue(sig.Usage, out vk);
+        if (vk == 0) return null;
+        var chord = new List<ushort> { vk };
+        return new TapChord(() => chord) { Description = "its normal key" };
+    }
+
     public void SetProfile(RemoteDef r, string profileId)
     {
         ApplyProfile(r, profileId);
+        r.BaseProfileId = r.Profile.Id;
+        r.AutoApp = null;
         Log.Write("{0} -> profile {1}", r.Name, r.Profile.Name);
         SaveState();
-        Raise(r.Name + "  →  " + r.Profile.Name);
+        ShowNotice("profile:" + r.Id, r.Profile.Name, r.Name);
+        Raise(null);
     }
 
+    // Next selectable profile (per-app variants are skipped: they switch in by themselves).
     public void CycleProfile(RemoteDef r)
     {
-        int i = Profiles.IndexOf(r.Profile);
-        SetProfile(r, Profiles[(i + 1) % Profiles.Count].Id);
+        // Stock is left out: a remote on Stock has no switcher button (F11 still makes everything stock).
+        var choices = Profiles.Where(p => !p.Hidden && p.Id != "stock").ToList();
+        int i = choices.FindIndex(p => p.Id == (r.BaseProfileId ?? r.Profile.Id));
+        SetProfile(r, choices[(i + 1) % choices.Count].Id);
+        ShowNotice("profile:" + r.Id, r.Profile.Name, r.Name + " · profile " + (choices.IndexOf(r.Profile) + 1) + " of " + choices.Count);
+        lastForegroundProc = null; // re-apply any per-app variant for the window in front
+    }
+
+    // ---- per-app variants ---------------------------------------------------------------
+
+    string lastForegroundProc;
+
+    // Called a few times a second: when the app in front changes, swap each remote to its chosen
+    // profile's variant for that app (or back to the chosen profile).
+    void CheckForegroundApp()
+    {
+        IntPtr fg = Spots.Foreground;
+        if (fg == IntPtr.Zero) return;
+        string proc = Spots.ProcessName(fg);
+        if (proc == lastForegroundProc) return;
+        if (proc.Equals("msedge", StringComparison.OrdinalIgnoreCase) && Spots.Title(fg) == "Airdeck") return; // our own window
+        lastForegroundProc = proc;
+        foreach (var r in Remotes)
+        {
+            var chosen = Profiles.FirstOrDefault(p => p.Id == (r.BaseProfileId ?? r.Profile.Id));
+            if (chosen == null) continue;
+            string variantId;
+            string target = chosen.Apps.TryGetValue(proc, out variantId) && Profiles.Any(p => p.Id == variantId) ? variantId : chosen.Id;
+            if (target == r.Profile.Id || r.Pressed.Count > 0) continue; // never swap under a held button
+            ApplyProfile(r, target);
+            r.AutoApp = target == chosen.Id ? null : proc;
+            Log.Write("{0}: {1} in front -> {2}", r.Name, proc, r.Profile.Name);
+            Raise(null);
+        }
+    }
+
+    // ---- app switching (Pg+/Pg-) ---------------------------------------------------------
+
+    List<IntPtr> appCycle;       // window order captured when a switching run starts
+    int appCycleIndex;
+    DateTime appCycleAt = DateTime.MinValue;
+
+    // Steps through open apps in most-recently-used order, like holding Alt and tapping Tab: a run
+    // of presses within 1.5 s keeps walking the same list instead of bouncing between two windows.
+    void SwitchApp(int direction)
+    {
+        if (appCycle == null || (DateTime.Now - appCycleAt).TotalMilliseconds > 1500)
+        {
+            appCycle = Spots.AppWindows();
+            appCycleIndex = 0;
+        }
+        appCycleAt = DateTime.Now;
+        if (appCycle.Count < 2) { ShowNotice("app", "No other apps", "Nothing else to switch to"); return; }
+        appCycleIndex = ((appCycleIndex + direction) % appCycle.Count + appCycle.Count) % appCycle.Count;
+        IntPtr target = appCycle[appCycleIndex];
+        Spots.BringToFront(target);
+        string title = Spots.Title(target);
+        ShowNotice("app", Spots.FriendlyName(Spots.ProcessName(target)), (title.Length > 70 ? title.Substring(0, 69) + "…" : title) + "   ·   " + (appCycleIndex + 1) + " / " + appCycle.Count);
     }
 
     public void SetPaused(bool paused)
@@ -280,7 +424,8 @@ class Controller : IDisposable
         foreach (var r in Remotes) ReleaseRemote(r);
         SaveState();
         Log.Write(paused ? "paused: all remotes stock" : "resumed");
-        Raise(paused ? "All remotes paused — stock behaviour" : "Remote profiles active again");
+        ShowNotice("pause", paused ? "All remotes paused" : "Remote profiles active again", paused ? "stock behaviour" : "");
+        Raise(null);
     }
 
     public RemoteDef FocusRemote
@@ -345,7 +490,13 @@ class Controller : IDisposable
             }
         };
         watchdog.Start();
+
+        foregroundTimer = new System.Windows.Forms.Timer { Interval = 300 };
+        foregroundTimer.Tick += (s, e) => { try { CheckForegroundApp(); } catch (Exception ex) { Log.Write("app check: {0}", ex.Message); } };
+        foregroundTimer.Start();
     }
+
+    System.Windows.Forms.Timer foregroundTimer;
 
     void TryInterception()
     {
@@ -389,8 +540,10 @@ class Controller : IDisposable
             Web.Broadcast("press", new Dictionary<string, object>
             {
                 { "remote", r.Id }, { "button", sig.Id }, { "edge", edge }, { "action", mapped ? action.Description : null },
+                { "test", TestMode },
             });
         if (!mapped) return false;
+        if (TestMode) return true; // recognised and swallowed, but nothing is triggered while testing
 
         if (edge == 1)
         {
@@ -649,7 +802,7 @@ class Controller : IDisposable
     void StepSpot(int delta)
     {
         int n = SpotList.Count;
-        if (n == 0) { Raise("No input spots yet — add some in Airdeck"); return; }
+        if (n == 0) { ShowNotice("spot", "No input spots yet", "Click into a text box and press Menu (or Ctrl+Alt+Shift+F9)"); return; }
         var fg = Spots.Foreground;
         int cur = lastSpot >= 0 && lastSpot < n && Spots.Matches(SpotList[lastSpot], fg) ? lastSpot : SpotList.FindIndex(s => Spots.Matches(s, fg));
         JumpSpot(cur < 0 ? (delta > 0 ? 0 : n - 1) : ((cur + delta) % n + n) % n);
@@ -657,11 +810,15 @@ class Controller : IDisposable
 
     public void JumpSpot(int index)
     {
-        if (index < 0 || index >= SpotList.Count) { Raise("Input spot " + (index + 1) + " does not exist"); return; }
+        if (index < 0 || index >= SpotList.Count)
+        {
+            ShowNotice("spot", "No spot " + (index + 1), SpotList.Count == 0 ? "Save one with Menu or Ctrl+Alt+Shift+F9" : "You have " + SpotList.Count + " input spot" + (SpotList.Count == 1 ? "" : "s"));
+            return;
+        }
         if (Interlocked.CompareExchange(ref jumping, 1, 0) != 0) return;
         lastSpot = index;
         var spot = SpotList[index];
-        if (Notify != null) Notify("→  " + (index + 1) + ".  " + spot.Label);
+        ShowNotice("spot", "Spot " + (index + 1) + " of " + SpotList.Count, spot.Label);
         if (Web != null) Web.Broadcast("spot", new Dictionary<string, object> { { "index", index } });
         Task.Run(() =>
         {
@@ -676,7 +833,13 @@ class Controller : IDisposable
     public InputSpot CaptureSpot()
     {
         var s = Spots.CaptureFocused();
-        Ui.Send(_ => { SpotList.Add(s); SaveSpots(); Raise("Saved input spot " + SpotList.Count + ":  " + s.Label); }, null);
+        Ui.Send(_ =>
+        {
+            SpotList.Add(s);
+            SaveSpots();
+            Raise(null);
+            ShowNotice("spot", "Saved as spot " + SpotList.Count, s.Label);
+        }, null);
         return s;
     }
 
@@ -713,7 +876,7 @@ class Controller : IDisposable
             { "remotes", Remotes.Select(r => (object)new Dictionary<string, object>
                 {
                     { "id", r.Id }, { "name", r.Name }, { "vid", r.Vid.ToString("X4") }, { "pid", r.Pid.ToString("X4") },
-                    { "connected", r.Connected }, { "profile", r.Profile.Id },
+                    { "connected", r.Connected }, { "profile", r.Profile.Id }, { "baseProfile", r.BaseProfileId ?? r.Profile.Id }, { "autoApp", r.AutoApp },
                     { "buttons", r.Buttons.Select(b => (object)new Dictionary<string, object>
                         {
                             { "id", b.Id }, { "source", b.Source }, { "semantics", b.Semantics },
@@ -724,8 +887,9 @@ class Controller : IDisposable
             { "profiles", Profiles.Select(p => (object)p.ToJson()).ToList() },
             { "templates", templates },
             { "paused", Paused },
+            { "testMode", TestMode },
             { "spots", SpotList.Select(s => (object)s.ToJson()).ToList() },
-            { "flow", new Dictionary<string, object> { { "ptt", Flow.Describe(Flow.Ptt) }, { "handsfree", Flow.Describe(Flow.HandsFree) }, { "command", Flow.Describe(Flow.Command) } } },
+            { "flow", new Dictionary<string, object> { { "ptt", Flow.Describe(Flow.Ptt) }, { "handsfree", Flow.Describe(Flow.HandsFree) }, { "command", Flow.Describe(Flow.Command) }, { "pasteLast", Flow.Describe(Flow.PasteLast) } } },
             { "interception", new Dictionary<string, object>
                 {
                     { "installed", InterceptionInstalled }, { "active", InterceptionActive },
@@ -786,6 +950,22 @@ class Controller : IDisposable
                 SetPaused(str("paused") == "True");
                 return HttpResult.Json(StateJson());
 
+            case "/api/testmode":
+                TestMode = str("on") == "True";
+                foreach (var r in Remotes) ReleaseRemote(r);
+                Log.Write(TestMode ? "test mode on (dry run)" : "test mode off");
+                Raise(TestMode ? "Test mode — buttons are recognised but do nothing" : "Test mode off — buttons act again");
+                return HttpResult.Json(StateJson());
+
+            case "/api/apps":
+            {
+                // Apps with a window open right now, for the per-app variant picker.
+                var apps = Spots.AppWindows().Select(h => Spots.ProcessName(h)).Where(p => p != "")
+                    .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(p => p)
+                    .Select(p => (object)new Dictionary<string, object> { { "process", p }, { "name", Spots.FriendlyName(p) } }).ToList();
+                return HttpResult.Json(new Dictionary<string, object> { { "apps", apps } });
+            }
+
             case "/api/profile":
             {
                 string id = str("id");
@@ -797,14 +977,32 @@ class Controller : IDisposable
                     id = Slug(name);
                     for (int i = 2; File.Exists(Path.Combine(ProfilesDir, id + ".json")); i++) id = Slug(name) + "-" + i;
                 }
-                var doc = new Dictionary<string, object>
-                {
-                    { "name", name }, { "description", str("description") ?? "" },
-                    { "buttons", req.ContainsKey("buttons") ? req["buttons"] : new Dictionary<string, object>() },
-                };
+                var buttons = req.ContainsKey("buttons") && req["buttons"] is Dictionary<string, object> ? (Dictionary<string, object>)req["buttons"] : new Dictionary<string, object>();
                 // Validate every action before touching the file.
-                foreach (var kv in (Dictionary<string, object>)doc["buttons"])
+                foreach (var kv in buttons)
                     if (!kv.Key.StartsWith("_")) RemoteAction.Create((Dictionary<string, object>)kv.Value);
+
+                // A variant stores only what differs from its parent (so parent edits flow through);
+                // a button the parent maps but the variant clears is saved as an explicit passthrough.
+                string parentId = str("extends");
+                var parent = parentId == null ? null : Profiles.FirstOrDefault(p => p.Id == parentId);
+                if (parent != null)
+                {
+                    var own = new Dictionary<string, object>();
+                    foreach (var kv in buttons)
+                    {
+                        Dictionary<string, object> inherited;
+                        if (!parent.Buttons.TryGetValue(kv.Key, out inherited) || Json.Write(inherited) != Json.Write(kv.Value)) own[kv.Key] = kv.Value;
+                    }
+                    foreach (var key in parent.Buttons.Keys.Where(k => !buttons.ContainsKey(k)))
+                        own[key] = new Dictionary<string, object> { { "action", "passthrough" } };
+                    buttons = own;
+                }
+                var doc = new Dictionary<string, object> { { "name", name }, { "description", str("description") ?? "" } };
+                if (parent != null) doc["extends"] = parent.Id;
+                if (str("hidden") == "True") doc["hidden"] = true;
+                if (req.ContainsKey("apps") && req["apps"] is Dictionary<string, object> && ((Dictionary<string, object>)req["apps"]).Count > 0) doc["apps"] = req["apps"];
+                doc["buttons"] = buttons;
                 File.WriteAllText(Path.Combine(ProfilesDir, id + ".json"), Json.Write(doc));
                 LoadProfiles();
                 Raise(null);
@@ -885,6 +1083,7 @@ class Controller : IDisposable
         Output.ReleaseAll();
         if (interception != null) interception.Dispose();
         if (watchdog != null) watchdog.Dispose();
+        if (foregroundTimer != null) foregroundTimer.Dispose();
         // The hook and listener window belong to the input thread; tear them down there.
         if (inputCtx != null)
             inputCtx.Send(_ =>
@@ -899,14 +1098,66 @@ class Controller : IDisposable
 
 // ------------------------------------------------------------------ shell
 
+// Small notices in the corner of the screen you are working on. Each notice is its own row,
+// stacked in the order it arrived (newest at the bottom) and timing out on its own; a notice
+// of the same kind (spot, app, desktop...) updates its row instead of piling up.
+class ToastStack
+{
+    const int Max = 4, Gap = 8, Margin = 24;
+    readonly List<Toast> rows = new List<Toast>();
+
+    public void Show(string kind, string title, string detail)
+    {
+        var row = rows.FirstOrDefault(t => kind != null ? t.Kind == kind : t.Kind == null && t.Title == title && t.Detail == detail);
+        if (row == null)
+        {
+            if (rows.Count >= Max) Remove(rows[0]);
+            var created = new Toast(kind);
+            created.Expired += () => Remove(created);
+            row = created;
+        }
+        else rows.Remove(row);
+        rows.Add(row); // newest (or just updated) goes to the bottom
+        row.SetText(title, detail);
+        Layout();
+        row.Present();
+    }
+
+    void Remove(Toast row)
+    {
+        if (!rows.Remove(row)) return;
+        row.Close();
+        row.Dispose();
+        Layout();
+    }
+
+    void Layout()
+    {
+        var wa = Screen.FromHandle(Spots.Foreground).WorkingArea;
+        int bottom = wa.Bottom - Margin, width = rows.Count == 0 ? 0 : rows.Max(t => t.Measure().Width);
+        for (int i = rows.Count - 1; i >= 0; i--)
+        {
+            var size = rows[i].Measure();
+            rows[i].Bounds = new Rectangle(wa.Right - Margin - width, bottom - size.Height, width, size.Height);
+            bottom -= size.Height + Gap;
+        }
+    }
+}
+
 class Toast : Form
 {
-    readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer { Interval = 2200 };
-    string text = "";
-    readonly Font titleFont = new Font("Bahnschrift SemiBold", 12.5f);
+    static readonly Font TitleFont = new Font("Bahnschrift SemiBold", 12.5f), DetailFont = new Font("Segoe UI", 10.5f);
+    static readonly Color Dim = Color.FromArgb(160, 156, 148);
+    readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer { Interval = 2600 };
+    public readonly string Kind;
+    public string Title { get; private set; }
+    public string Detail { get; private set; }
+    public event Action Expired;
 
-    public Toast()
+    public Toast(string kind)
     {
+        Kind = kind;
+        Title = Detail = "";
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         TopMost = true;
@@ -914,7 +1165,7 @@ class Toast : Form
         BackColor = Color.FromArgb(22, 23, 26);
         ForeColor = Color.FromArgb(236, 232, 224);
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
-        timer.Tick += (s, e) => { timer.Stop(); Hide(); };
+        timer.Tick += (s, e) => { timer.Stop(); if (Expired != null) Expired(); };
     }
 
     protected override bool ShowWithoutActivation { get { return true; } }
@@ -924,31 +1175,56 @@ class Toast : Form
         get
         {
             var cp = base.CreateParams;
-            cp.ExStyle |= 0x08000000 | 0x00000080 | 0x00000008; // NOACTIVATE | TOOLWINDOW | TOPMOST
+            cp.ExStyle |= 0x08000000 | 0x00000080 | 0x00000008 | 0x00000020; // NOACTIVATE | TOOLWINDOW | TOPMOST | TRANSPARENT (click-through)
             return cp;
         }
     }
 
-    protected override void OnPaint(PaintEventArgs e)
+    public void SetText(string title, string detail)
     {
-        using (var accent = new SolidBrush(Color.FromArgb(255, 178, 36))) e.Graphics.FillRectangle(accent, 0, 0, 4, Height);
-        using (var edge = new Pen(Color.FromArgb(52, 54, 60))) e.Graphics.DrawRectangle(edge, 0, 0, Width - 1, Height - 1);
-        var pad = TextRenderer.MeasureText("M", titleFont);
-        TextRenderer.DrawText(e.Graphics, text, titleFont, new Point(pad.Width + 4, pad.Height / 2), ForeColor);
+        Title = title ?? "";
+        Detail = detail ?? "";
+        if (Detail.Length > 80) Detail = Detail.Substring(0, 79) + "…";
+        Invalidate();
     }
 
-    public void ShowMessage(string message)
+    string DetailText { get { return Detail == "" ? "" : "  ·  " + Detail; } }
+
+    public Size Measure()
     {
-        text = message;
-        var size = TextRenderer.MeasureText(text, titleFont);
-        var pad = TextRenderer.MeasureText("M", titleFont);
-        var wa = Screen.PrimaryScreen.WorkingArea;
-        Bounds = new Rectangle(wa.Right - (size.Width + pad.Width * 2 + 4) - 24, wa.Bottom - (size.Height + pad.Height) - 24,
-                               size.Width + pad.Width * 2 + 4, size.Height + pad.Height);
+        var pad = TextRenderer.MeasureText("M", TitleFont);
+        var t = TextRenderer.MeasureText(Title, TitleFont);
+        int w = t.Width + (Detail == "" ? 0 : TextRenderer.MeasureText(DetailText, DetailFont).Width);
+        return new Size(w + pad.Width * 2 + 4, t.Height + pad.Height);
+    }
+
+    public void Present()
+    {
         if (!Visible) Show();
         Invalidate();
         timer.Stop();
         timer.Start();
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        using (var accent = new SolidBrush(Color.FromArgb(255, 178, 36))) g.FillRectangle(accent, 0, 0, 4, Height);
+        using (var edge = new Pen(Color.FromArgb(52, 54, 60))) g.DrawRectangle(edge, 0, 0, Width - 1, Height - 1);
+        var pad = TextRenderer.MeasureText("M", TitleFont);
+        var t = TextRenderer.MeasureText(Title, TitleFont);
+        TextRenderer.DrawText(g, Title, TitleFont, new Point(pad.Width + 4, pad.Height / 2), ForeColor);
+        if (Detail != "")
+        {
+            var d = TextRenderer.MeasureText(DetailText, DetailFont);
+            TextRenderer.DrawText(g, DetailText, DetailFont, new Point(pad.Width + 4 + t.Width, pad.Height / 2 + (t.Height - d.Height) / 2 + 1), Dim);
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) timer.Dispose();
+        base.Dispose(disposing);
     }
 }
 
@@ -969,7 +1245,7 @@ class TrayApp : ApplicationContext
 
     readonly Controller controller;
     readonly NotifyIcon tray;
-    readonly Toast toast = new Toast();
+    readonly ToastStack toasts = new ToastStack();
     readonly HotkeyWindow hotkeys = new HotkeyWindow();
     readonly List<RegisteredWaitHandle> waits = new List<RegisteredWaitHandle>();
     readonly SynchronizationContext ui;
@@ -980,14 +1256,14 @@ class TrayApp : ApplicationContext
         this.controller = controller;
         ui = SynchronizationContext.Current;
         controller.Ui = ui;
-        toast.CreateControl();
 
         tray = new NotifyIcon { Visible = true, ContextMenuStrip = new ContextMenuStrip() };
         tray.ContextMenuStrip.Opening += (s, e) => BuildMenu();
         tray.MouseClick += (s, e) => { if (e.Button == MouseButtons.Left) OpenWindow(); };
 
         controller.Changed += () => ui.Post(_ => UpdateTray(), null);
-        controller.Notify += text => ui.Post(_ => toast.ShowMessage(text), null);
+        controller.Notify += text => ui.Post(_ => toasts.Show(null, text, ""), null);
+        controller.Notice += (kind, title, detail) => ui.Post(_ => toasts.Show(kind, title, detail), null);
 
         web = new WebServer(Path.Combine(controller.Root, "ui"), controller.Api);
         web.Start(47800);
@@ -1004,14 +1280,14 @@ class TrayApp : ApplicationContext
             if (id == HotExit) ExitThread();
             else if (id == HotPause) controller.SetPaused(!controller.Paused);
             else if (id == HotNext && controller.FocusRemote != null) controller.CycleProfile(controller.FocusRemote);
-            else if (id == HotCapture) Task.Run(() => { try { controller.CaptureSpot(); } catch (Exception ex) { ui.Post(_ => toast.ShowMessage("Capture failed: " + ex.Message), null); } });
+            else if (id == HotCapture) Task.Run(() => { try { controller.CaptureSpot(); } catch (Exception ex) { ui.Post(_ => toasts.Show(null, "Capture failed: " + ex.Message, ""), null); } });
         };
 
         waits.Add(ThreadPool.RegisterWaitForSingleObject(exitSignal, (s, t) => ui.Post(_ => ExitThread(), null), null, -1, true));
         waits.Add(ThreadPool.RegisterWaitForSingleObject(showSignal, (s, t) => { showSignal.Reset(); ui.Post(_ => OpenWindow(), null); }, null, -1, false));
         UpdateTray();
         if (openWindow) OpenWindow();
-        else toast.ShowMessage("Airdeck is running\n" + Summary());
+        else toasts.Show(null, "Airdeck is running\n" + Summary(), "");
     }
 
     string Summary()
@@ -1124,7 +1400,7 @@ class TrayApp : ApplicationContext
         {
             Checked = controller.Paused, ShortcutKeyDisplayString = "Ctrl+Alt+Shift+F11"
         });
-        m.Items.Add(new ToolStripMenuItem("Save focused input as spot", null, (s, e) => toast.ShowMessage("Click into an input box, then press Ctrl+Alt+Shift+F9"))
+        m.Items.Add(new ToolStripMenuItem("Save focused input as spot", null, (s, e) => toasts.Show(null, "Click into an input box, then press Ctrl+Alt+Shift+F9", ""))
         {
             ShortcutKeyDisplayString = "Ctrl+Alt+Shift+F9"
         });
@@ -1171,6 +1447,8 @@ static class AirdeckProgram
         return true;
     }
 
+    [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+
     [STAThread]
     static int Main(string[] args)
     {
@@ -1195,7 +1473,8 @@ static class AirdeckProgram
                 if (!args.Contains("--tray")) Signal(ShowEventName);
                 return 0;
             }
-            Native.SetProcessDPIAware();
+            // Per-monitor DPI awareness, so screen coordinates are exact on mixed-scaling multi-monitor setups.
+            try { if (!SetProcessDpiAwarenessContext(new IntPtr(-4))) Native.SetProcessDPIAware(); } catch (EntryPointNotFoundException) { Native.SetProcessDPIAware(); }
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Log.Init(Path.Combine(root, "logs"));

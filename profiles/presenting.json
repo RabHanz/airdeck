@@ -1,0 +1,12 @@
+{
+  "name": "Presenting",
+  "description": "Slides from the couch or the stage: OK / Back go to the next / previous slide, Home blanks the screen, hold Menu starts the slideshow (F5). Voice still toggles dictation.",
+  "buttons": {
+    "ok": {"action": "keys", "keys": "right"},
+    "back": {"action": "keys", "keys": "left"},
+    "home": {"action": "keys", "keys": "b"},
+    "home_back": {"action": "keys", "keys": "left"},
+    "mic": {"action": "flow_handsfree"},
+    "menu": {"action": "profile_next", "hold": {"action": "keys", "keys": "f5"}}
+  }
+}

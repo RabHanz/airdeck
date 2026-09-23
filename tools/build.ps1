@@ -18,7 +18,7 @@ if ($LASTEXITCODE) { throw 'hidtool build failed' }
 if ($LASTEXITCODE) { throw 'airdeck-mapper build failed' }
 
 & $csc @common "/win32icon:$icon" "/r:$wpf\UIAutomationClient.dll" "/r:$wpf\UIAutomationTypes.dll" "/r:$wpf\WindowsBase.dll" /target:winexe "/out:$bin\airdeck.exe" `
-    "$src\RawInput.cs" "$src\Json.cs" "$src\Airdeck.cs" "$src\AirdeckApp.cs" "$src\Interception.cs" "$src\Targets.cs" "$src\WebServer.cs"
+    "$src\RawInput.cs" "$src\Json.cs" "$src\Airdeck.cs" "$src\AirdeckApp.cs" "$src\Interception.cs" "$src\Targets.cs" "$src\Screens.cs" "$src\WebServer.cs"
 if ($LASTEXITCODE) { throw 'airdeck build failed' }
 
 # The Interception user-mode library must sit next to airdeck.exe (fetched by get-interception.ps1).

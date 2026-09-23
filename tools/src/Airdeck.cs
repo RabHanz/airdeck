@@ -251,6 +251,7 @@ static class Flow
     public static List<ushort> Ptt = new List<ushort> { 0xA2, 0x5B };             // LCtrl + LWin
     public static List<ushort> HandsFree = new List<ushort> { 0xA2, 0x20, 0x5B };  // LCtrl + Space + LWin (Win last: see Load)
     public static List<ushort> Command = new List<ushort> { 0xA2, 0xA4, 0x5B };    // LCtrl + LAlt + LWin
+    public static List<ushort> PasteLast = new List<ushort> { 0xA0, 0xA4, 0x5A };  // LShift + LAlt + Z
 
     static bool IsWin(ushort vk) { return vk == 0x5B || vk == 0x5C; }
     static bool IsModifier(ushort vk) { return (vk >= 0xA0 && vk <= 0xA5) || vk == 0x5B || vk == 0x5C || (vk >= 0x10 && vk <= 0x12); }
@@ -275,10 +276,11 @@ static class Flow
                 if (name == "ptt") Ptt = chord;
                 else if (name == "popo") HandsFree = chord;
                 else if (name == "lens") Command = chord;
+                else if (name == "paste_last_text") PasteLast = chord;
             }
         }
         catch (Exception ex) { Log.Write("could not read Flow config: {0}", ex.Message); }
-        Log.Write("Flow shortcuts: ptt={0} hands-free={1} command={2}", Describe(Ptt), Describe(HandsFree), Describe(Command));
+        Log.Write("Flow shortcuts: ptt={0} hands-free={1} command={2} paste-last={3}", Describe(Ptt), Describe(HandsFree), Describe(Command), Describe(PasteLast));
     }
 
     static Dictionary<string, object> FindShortcuts(object node)
@@ -311,7 +313,19 @@ abstract class RemoteAction
     public virtual void Up() { }
     public virtual void Cancel() { }
 
+    // A button spec may add gestures: { "action": ..., "hold": { "action": ... }, "double": { "action": ... } }.
     public static RemoteAction Create(Dictionary<string, object> spec)
+    {
+        var hold = spec.ContainsKey("hold") ? spec["hold"] as Dictionary<string, object> : null;
+        var dbl = spec.ContainsKey("double") ? spec["double"] as Dictionary<string, object> : null;
+        var tap = CreateSingle(spec);
+        if (hold == null && dbl == null) return tap;
+        var g = new GestureAction(tap, hold != null ? CreateSingle(hold) : null, dbl != null ? CreateSingle(dbl) : null);
+        if (g.Tap == null && g.Hold == null && g.Double == null) return null;
+        return g;
+    }
+
+    static RemoteAction CreateSingle(Dictionary<string, object> spec)
     {
         string action = spec.ContainsKey("action") ? (string)spec["action"] : "passthrough";
         Func<string, string> arg = k => spec.ContainsKey(k) ? spec[k] as string : null;
@@ -338,18 +352,153 @@ abstract class RemoteAction
                 if (!int.TryParse(arg("spot") ?? Convert.ToString(spec.ContainsKey("spot") ? spec["spot"] : ""), out n) || n < 1)
                     throw new FormatException("spot_goto needs \"spot\": 1, 2, ...");
                 return new CallAction(() => Workflow.Goto(n - 1)) { Description = "input spot " + n };
-            case "desktop_next": return new TapChord(() => Output.ParseChord("ctrl+win+right"), true) { Description = "next desktop" };
-            case "desktop_prev": return new TapChord(() => Output.ParseChord("ctrl+win+left"), true) { Description = "previous desktop" };
+            case "desktop_next": return new DesktopAction(+1) { Description = "next desktop" };
+            case "desktop_prev": return new DesktopAction(-1) { Description = "previous desktop" };
+            case "flow_paste_last": return new TapChord(() => Flow.PasteLast) { Description = "Flow paste last transcript" };
+            case "spot_capture": return new CallAction(() => Workflow.Capture()) { Description = "save input as spot" };
+            case "profile_next": return new CallAction(() => Workflow.NextProfile()) { Description = "next profile" };
+            case "app_next": return new CallAction(() => Workflow.SwitchApp(+1)) { Description = "next app" };
+            case "app_prev": return new CallAction(() => Workflow.SwitchApp(-1)) { Description = "previous app" };
+            case "screen_focus":
+            {
+                string dir = (arg("dir") ?? "").ToLowerInvariant();
+                if (!new[] { "left", "right", "up", "down" }.Contains(dir)) throw new FormatException("screen_focus needs \"dir\": left, right, up or down");
+                return new CallAction(() => Workflow.Screen("focus", dir)) { Description = "go to screen " + dir };
+            }
+            case "window_to_screen":
+            {
+                string dir = (arg("dir") ?? "next").ToLowerInvariant();
+                if (!new[] { "next", "left", "right", "up", "down" }.Contains(dir)) throw new FormatException("window_to_screen needs \"dir\": next, left, right, up or down");
+                return new CallAction(() => Workflow.Screen("move", dir)) { Description = "move window to " + (dir == "next" ? "next screen" : "screen " + dir) };
+            }
         }
         throw new FormatException("unknown action '" + action + "'");
     }
 }
 
-// Hooks into the controller for actions that need app-level state (input spots).
+// Hooks into the controller for actions that need app-level state (input spots, notices).
 static class Workflow
 {
     public static Action<int> Step = d => { };
     public static Action<int> Goto = i => { };
+    public static Action Capture = () => { };
+    public static Action<int> DesktopSwitched = d => { };
+    public static Action NextProfile = () => { };
+    public static Action<int> SwitchApp = d => { };
+    public static Action<string, string> Screen = (what, dir) => { };
+}
+
+// Reads which virtual desktop is current (and its name) from Explorer's registry state.
+static class VirtualDesktops
+{
+    public static Tuple<string, string> Current()
+    {
+        try
+        {
+            const string root = @"Software\Microsoft\Windows\CurrentVersion\Explorer\VirtualDesktops";
+            using (var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(root))
+            {
+                var ids = k == null ? null : k.GetValue("VirtualDesktopIDs") as byte[];
+                var cur = k == null ? null : k.GetValue("CurrentVirtualDesktop") as byte[];
+                if (cur == null) // Windows 10 keeps it per session
+                    using (var s = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\SessionInfo\" + Process.GetCurrentProcess().SessionId + @"\VirtualDesktops"))
+                        cur = s == null ? null : s.GetValue("CurrentVirtualDesktop") as byte[];
+                if (ids == null || cur == null || cur.Length != 16) return null;
+                int count = ids.Length / 16, index = -1;
+                for (int i = 0; i < count && index < 0; i++)
+                {
+                    bool same = true;
+                    for (int j = 0; j < 16 && same; j++) same = ids[i * 16 + j] == cur[j];
+                    if (same) index = i;
+                }
+                if (index < 0) return null;
+                string name = null;
+                using (var d = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(root + @"\Desktops\" + new Guid(cur).ToString("B").ToUpperInvariant()))
+                    if (d != null) name = d.GetValue("Name") as string;
+                return Tuple.Create("Desktop " + (index + 1) + " of " + count, string.IsNullOrEmpty(name) ? "" : name);
+            }
+        }
+        catch (Exception ex) { Log.Write("desktop lookup failed: {0}", ex.Message); return null; }
+    }
+}
+
+class DesktopAction : RemoteAction
+{
+    readonly int direction;
+    public DesktopAction(int direction) { this.direction = direction; }
+    public override void Down()
+    {
+        var chord = Output.ParseChord(direction > 0 ? "ctrl+win+right" : "ctrl+win+left");
+        Output.GuardedDown(chord);
+        Output.GuardedUp(chord);
+        Workflow.DesktopSwitched(direction);
+    }
+}
+
+// Tap / hold / double-tap on one button. With only a tap action the button reacts instantly
+// elsewhere; here the tap waits until release (and, with a double-tap action, briefly after it).
+class GestureAction : RemoteAction
+{
+    public const int HoldMs = 450, DoubleMs = 280;
+    public RemoteAction Tap;                  // may be filled in with the button's own key (see ApplyProfile)
+    public readonly RemoteAction Hold, Double;
+    readonly System.Windows.Forms.Timer holdTimer = new System.Windows.Forms.Timer { Interval = HoldMs };
+    readonly System.Windows.Forms.Timer doubleTimer = new System.Windows.Forms.Timer { Interval = DoubleMs };
+    bool pressed, holding, waitingSecond, secondPress;
+
+    public GestureAction(RemoteAction tap, RemoteAction hold, RemoteAction dbl)
+    {
+        Tap = tap; Hold = hold; Double = dbl;
+        Description = (tap != null ? tap.Description : "default")
+            + (hold != null ? " · hold: " + hold.Description : "") + (dbl != null ? " · double: " + dbl.Description : "");
+        holdTimer.Tick += (s, e) =>
+        {
+            holdTimer.Stop();
+            if (!pressed || Hold == null) return;
+            holding = true;
+            Hold.Down();
+        };
+        doubleTimer.Tick += (s, e) =>
+        {
+            doubleTimer.Stop();
+            waitingSecond = false;
+            Fire(Tap);
+        };
+    }
+
+    static void Fire(RemoteAction a) { if (a != null) { a.Down(); a.Up(); } }
+
+    public override void Down()
+    {
+        pressed = true;
+        if (waitingSecond && Double != null)
+        {
+            doubleTimer.Stop();
+            waitingSecond = false;
+            secondPress = true;
+            Double.Down();
+            return;
+        }
+        if (Hold != null) holdTimer.Start();
+    }
+
+    public override void Up()
+    {
+        pressed = false;
+        holdTimer.Stop();
+        if (secondPress) { secondPress = false; Double.Up(); return; }
+        if (holding) { holding = false; Hold.Up(); return; }
+        if (Double != null) { waitingSecond = true; doubleTimer.Start(); return; }
+        Fire(Tap);
+    }
+
+    public override void Cancel()
+    {
+        holdTimer.Stop(); doubleTimer.Stop();
+        if (holding) Hold.Cancel();
+        if (secondPress) Double.Cancel();
+        pressed = holding = waitingSecond = secondPress = false;
+    }
 }
 
 class CallAction : RemoteAction

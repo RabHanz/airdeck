@@ -1,16 +1,16 @@
 {
   "name": "AI dictation workflow",
-  "description": "Hold Home to dictate, tap Voice for hands-free, OK sends (Enter), Back cancels. Right/Left hop between your input spots, 1-9 jump straight to one, Pg+ (left) / Pg- (right) switch to the desktop on that side. Media and volume keys stay normal. Arrows, digits and Pg need the keyboard-key driver.",
+  "description": "Your main workflow. Hold Home to dictate, tap Voice for hands-free, OK sends (hold: Ctrl+Enter). Right/Left and 1-9 move between input spots; hold an arrow to go to the screen that way. Pg+/Pg- switch apps (hold: desktops). 0 re-pastes the last transcript (hold: move the window to the next screen). Menu changes profile (hold: save input spot).",
   "buttons": {
     "home": {"action": "flow_ptt"},
     "home_back": {"action": "flow_ptt"},
     "mic": {"action": "flow_handsfree"},
-    "ok": {"action": "keys", "keys": "enter"},
-    "back": {"action": "flow_cancel"},
-    "right": {"action": "spot_next"},
-    "left": {"action": "spot_prev"},
-    "page_up": {"action": "desktop_prev"},
-    "page_down": {"action": "desktop_next"},
+    "ok": {"action": "keys", "keys": "enter", "hold": {"action": "keys", "keys": "ctrl+enter"}},
+    "back": {"action": "flow_cancel", "hold": {"action": "keys", "keys": "ctrl+z"}},
+    "right": {"action": "spot_next", "hold": {"action": "screen_focus", "dir": "right"}},
+    "left": {"action": "spot_prev", "hold": {"action": "screen_focus", "dir": "left"}},
+    "page_up": {"action": "app_prev", "hold": {"action": "desktop_prev"}},
+    "page_down": {"action": "app_next", "hold": {"action": "desktop_next"}},
     "num_1": {"action": "spot_goto", "spot": 1},
     "num_2": {"action": "spot_goto", "spot": 2},
     "num_3": {"action": "spot_goto", "spot": 3},
@@ -19,6 +19,11 @@
     "num_6": {"action": "spot_goto", "spot": 6},
     "num_7": {"action": "spot_goto", "spot": 7},
     "num_8": {"action": "spot_goto", "spot": 8},
-    "num_9": {"action": "spot_goto", "spot": 9}
+    "num_9": {"action": "spot_goto", "spot": 9},
+    "num_0": {"action": "flow_paste_last", "hold": {"action": "window_to_screen", "dir": "next"}},
+    "del": {"action": "keys", "keys": "ctrl+backspace"},
+    "menu": {"action": "profile_next", "hold": {"action": "spot_capture"}},
+    "up": {"action": "passthrough", "hold": {"action": "screen_focus", "dir": "up"}},
+    "down": {"action": "passthrough", "hold": {"action": "screen_focus", "dir": "down"}}
   }
 }

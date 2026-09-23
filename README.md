@@ -22,11 +22,15 @@ Airdeck fixes that. It works out **which physical device** each key came from an
 ## Features
 
 - **Device-specific remapping.** Remote Home = Flow push-to-talk; keyboard Home = still Home.
-- **Profiles per remote.** *Stock*, *Wispr Flow*, *AI dictation workflow*, *Flow + desktop*, or your own. Switch from the app, the tray, or a hotkey.
+- **Profiles per remote.** *AI dictation workflow*, *Couch & media*, *Presenting*, *Stock*, or your own. Cycle them from the remote itself (Menu), the app, the tray, or a hotkey. A small notice in the corner tells you where you landed; notices stack in order, and repeats of the same kind update in place.
+- **Per-app variants (optional).** A profile can swap in a variant while a given app is in front, for example to give OK a different meaning in one editor. Variants only store what they change. None ship by default, so every button does the same thing everywhere.
+- **Tap, hold and double-tap.** Every button can do up to three things. For example, OK sends Enter and holding it sends Ctrl+Enter.
+- **Multi-monitor.** Hold an arrow to jump to the screen in that direction (pointer and focus). Hold 0 to throw the current window to the next screen. Screens are found by their real arrangement, so a monitor above works too.
 - **Wispr Flow built in.** Push-to-talk (hold), hands-free toggle, command mode and cancel. Flow's shortcuts are read from its own settings.
 - **Input spots.** Save the input boxes you dictate into (a VS Code terminal, a browser chat box, anything). The remote hops between them, finds the box with UI Automation (or clicks the remembered spot) and puts the caret there. It even switches to the right browser tab.
-- **Desktop control.** Virtual desktops, shortcuts, text snippets, clicks, launching apps.
+- **Desktop control.** App switching (most-recently-used, like Alt+Tab), virtual desktops, shortcuts, text snippets, clicks, launching apps.
 - **A live remote view.** Your remote drawn from its real layout, callouts for every mapped button, keys that light up as you press them, and a signal timeline that shows holds vs taps.
+- **A Test view** with a dry-run switch. Press every button and watch the checklist fill in without anything actually happening.
 - **A guided button mapper** for new remotes. Press each highlighted button once; the results save automatically.
 - **Safety first.**
   - `Ctrl+Alt+Shift+F11` pauses everything (all remotes stock).
@@ -38,6 +42,10 @@ Airdeck fixes that. It works out **which physical device** each key came from an
 <tr>
 <td><img src="docs/screenshots/profiles.png" alt="Profiles"></td>
 <td><img src="docs/screenshots/input-spots.png" alt="Input spots"></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/test.png" alt="Test view with dry run"></td>
+<td><img src="docs/screenshots/settings.png" alt="Settings"></td>
 </tr>
 </table>
 
@@ -84,25 +92,36 @@ Windows blocks input from normal apps into elevated windows. Use *Settings → R
 | | |
 |---|---|
 | **Remote view** | Click a button on the drawing, or just press it on the remote, and pick an action. Changes save instantly. Editing Stock creates your own copy. |
-| **Profiles** | Create, duplicate, rename and delete profiles, and choose which remote runs which. |
+| **Profiles** | Create, duplicate, rename and delete profiles, choose which remote runs which, and optionally add per-app variants. |
+| **Test** | Dry run: presses are shown and ticked off, but no action runs. Leaving the view turns it off. |
 | **Input spots** | Click into an input anywhere and press `Ctrl+Alt+Shift+F9`, or use the 4-second capture. Drag to reorder. |
 | **Hotkeys** | `Ctrl+Alt+Shift+` **F9** save spot · **F10** next profile · **F11** pause all · **F12** exit |
 | **Recovery** | `disable-remote-mapping.cmd` / `restart-remote-mapping.cmd` in the install folder |
 
 ### The AI dictation workflow profile
 
-| Button | Action |
-|---|---|
-| Home (hold) | Wispr Flow push-to-talk |
-| Voice (tap) | Wispr Flow hands-free on/off |
-| OK | Enter: send what you dictated |
-| Back | Cancel the dictation (Esc) |
-| Right / Left | Next / previous input spot |
-| 1–9 | Jump straight to input spot *n* |
-| Pg+ (left) / Pg- (right) | Desktop to the left / right |
-| Volume, media keys | Unchanged |
+| Button | Tap | Hold |
+|---|---|---|
+| Home | Wispr Flow push-to-talk (while held) | |
+| Voice | Wispr Flow hands-free on/off | |
+| OK | Enter: send what you dictated | Ctrl+Enter |
+| Back | Cancel the dictation | Undo (Ctrl+Z) |
+| Right / Left | Next / previous input spot | Go to the screen on the right / left |
+| Up / Down | Normal arrows | Go to the screen above / below |
+| Pg+ / Pg- | Previous / next app (keep pressing to walk further back, like Alt+Tab) | Desktop to the left / right |
+| 1–9 | Jump straight to input spot *n* | |
+| 0 | Paste the last Flow transcript | Move the window to the next screen |
+| DEL | Delete the previous word | |
+| Menu | Next profile | Save the focused box as an input spot |
+| Volume, media keys | Unchanged | |
 
-Home, Voice, OK and Back work without any driver. The arrows, 1–9 and Pg± need the optional keyboard-key driver below. Volume and media keys are left alone on purpose: Windows reads them straight from the remote, so remapping them would still change the volume or skip tracks.
+Home, Voice, OK and Back work without any driver. The arrows, digits, Pg±, DEL and Menu need the optional keyboard-key driver above. Volume and media keys are left alone on purpose: Windows reads them straight from the remote, so remapping them would still change the volume or skip tracks. That is also why app switching lives on Pg± and not on Next/Previous.
+
+### Other profiles
+
+- **Couch & media.** OK clicks (hold: right-click), Back goes back a page, Right/Left switch tabs, 1–9 jump to a tab, 0 opens a new tab, hold DEL closes one. Home and Voice still dictate.
+- **Presenting.** OK / Back go to the next / previous slide, Home blanks the screen, hold Menu starts the slideshow.
+- **Stock.** The remote exactly as it came. The Menu cycle skips it; use `Ctrl+Alt+Shift+F11` or the app to go stock.
 
 ## Profiles are plain JSON
 
@@ -113,21 +132,27 @@ Home, Voice, OK and Back work without any driver. The arrows, 1–9 and Pg± nee
   "buttons": {
     "home":  { "action": "flow_ptt" },
     "mic":   { "action": "flow_handsfree" },
-    "ok":    { "action": "keys", "keys": "enter" },
-    "right": { "action": "spot_next" },
+    "ok":    { "action": "keys", "keys": "enter", "hold": { "action": "keys", "keys": "ctrl+enter" } },
+    "right": { "action": "spot_next", "hold": { "action": "screen_focus", "dir": "right" } },
     "num_1": { "action": "spot_goto", "spot": 1 },
-    "next":  { "action": "keys", "keys": "ctrl+tab" },
-    "prev":  { "action": "text", "text": "Please continue." }
-  }
+    "page_down": { "action": "app_next", "double": { "action": "desktop_next" } },
+    "menu":  { "action": "profile_next" }
+  },
+  "apps": { "Code": "my-mode-vscode" }
 }
 ```
 
+A variant is a profile with `"extends": "my-mode"` and `"hidden": true` that lists only the buttons it changes. `apps` maps a process name (without `.exe`) to the variant used while that app is in front.
+
 Actions:
-- **Wispr Flow:** `flow_ptt`, `flow_handsfree`, `flow_command`, `flow_cancel`.
-- **Input spots and desktops:** `spot_next`, `spot_prev`, `spot_goto`, `desktop_next`, `desktop_prev`.
+- **Wispr Flow:** `flow_ptt`, `flow_handsfree`, `flow_command`, `flow_cancel`, `flow_paste_last`.
+- **Input spots:** `spot_next`, `spot_prev`, `spot_goto`, `spot_capture`.
+- **Windows and screens:** `app_next`, `app_prev`, `desktop_next`, `desktop_prev`, `screen_focus` and `window_to_screen` (with `"dir"`: `left`, `right`, `up`, `down`, or `next` for moving windows).
 - **Keys and text:** `keys`, which stays held while the button is held, and `text`.
 - **Mouse:** `left_click`, `right_click`, `middle_click`.
-- **Other:** `run`, `block`, and `passthrough` (the default).
+- **Airdeck and system:** `profile_next`, `run`, `block`, and `passthrough` (the default).
+
+Any action can carry `hold` and `double` sub-actions. A button with gestures waits briefly (450 ms for a hold, 280 ms for a double-tap) before acting on a plain tap.
 
 Button ids come from [remote-devices.json](remote-devices.json).
 
