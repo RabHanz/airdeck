@@ -25,7 +25,7 @@ Airdeck fixes that. It works out **which physical device** each key came from an
 - **Profiles per remote.** *AI dictation workflow*, *Media & video*, *Video calls*, *Couch browsing*, *Presenting*, *Stock*, or your own. Cycle them from the remote itself (Menu), the app, the tray, or a hotkey. A small notice in the corner tells you where you landed; notices stack in order, and repeats of the same kind update in place.
 - **Per-app variants (optional).** A profile can swap in a variant while a given app is in front, for example to give OK a different meaning in one editor. Variants only store what they change. None ship by default, so every button does the same thing everywhere.
 - **Tap, hold and double-tap.** Every button can do up to three things. For example, OK sends Enter and holding it sends Ctrl+Enter.
-- **Multi-monitor.** Hold an arrow to jump to the screen in that direction (pointer and focus). Hold 0 to throw the current window to the next screen. Screens are found by their real arrangement, so a monitor above works too.
+- **Multi-monitor.** Hold an arrow to move the window you're in to the screen in that direction; it keeps its size and position, and a maximised window stays maximised. Screens are found by their real arrangement, so a monitor above works too.
 - **Wispr Flow built in.** Push-to-talk (hold), hands-free toggle, command mode and cancel. Flow's shortcuts are read from its own settings.
 - **Input spots.** Save the input boxes you dictate into (a VS Code terminal, a browser chat box, anything). The remote hops between them, finds the box with UI Automation (or clicks the remembered spot) and puts the caret there. It even switches to the right browser tab.
 - **Desktop control.** App switching (most-recently-used, like Alt+Tab), virtual desktops, shortcuts, text snippets, clicks, launching apps.
@@ -106,11 +106,11 @@ Windows blocks input from normal apps into elevated windows. Use *Settings → R
 | Voice | Wispr Flow hands-free on/off | | |
 | OK | Enter: send what you dictated | Ctrl+Enter | New line (Shift+Enter) |
 | Back | Cancel the dictation | Clear the box | Undo |
-| Right / Left | Next / previous input spot | Go to the screen on the right / left | |
-| Up / Down | Normal arrows | Go to the screen above / below | |
+| Right / Left | Next / previous input spot | Move the window you're in to the screen on the right / left | |
+| Up / Down | Normal arrows | Move the window you're in to the screen above / below | |
 | Pg+ / Pg- | Previous / next app (keep pressing to walk further back, like Alt+Tab) | Desktop to the left / right | |
-| 1–9 | Jump straight to input spot *n* | Save the box you're in as spot *n* (like a radio preset) | |
-| 0 | Paste the last Flow transcript | Move the window to the next screen | |
+| 1–9 | Jump straight to input spot *n* | Replace spot *n* with the box you're in | |
+| 0 | Paste the last Flow transcript | Save the box you're in as the next free spot | |
 | DEL | Delete the previous word | | |
 | Menu | Next profile | | |
 | Volume, media keys | Unchanged | | |

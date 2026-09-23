@@ -78,7 +78,7 @@ const ACTIONS = [
     { id: "spot_next", name: "Next input spot", hint: "Hop to the next saved input" },
     { id: "spot_prev", name: "Previous spot", hint: "Hop back one input" },
     { id: "spot_goto", name: "Go to spot\u2026", hint: "Jump straight to one input", param: "spot" },
-    { id: "spot_capture", name: "Save input as spot", hint: "Remember the box you're in", param: "slot" },
+    { id: "spot_capture", name: "Save input as spot", hint: "Next free number, or replace one", param: "slot" },
   ]},
   { group: "Windows & screens", items: [
     { id: "app_next", name: "Next app", hint: "Like Alt+Tab, forward" },
@@ -133,9 +133,13 @@ function actionName(spec, short = false) {
       const spot = S.state.spots[(spec.spot | 0) - 1];
       return short ? `spot ${spec.spot}` : spot ? `Spot ${spec.spot} \u00B7 ${spot.label}` : `Input spot ${spec.spot}`;
     }
-    case "spot_capture": return spec.spot ? (short ? `save as spot ${spec.spot}` : `Save input as spot ${spec.spot}`) : (short ? "save spot" : "Save input as spot");
+    case "spot_capture": return spec.spot ? (short ? `save as spot ${spec.spot}` : `Save input as spot ${spec.spot}`) : (short ? "save as next spot" : "Save input as next spot");
     case "screen_focus": return short ? `screen ${spec.dir}` : `Go to screen ${DIRS[spec.dir] || spec.dir}`;
-    case "window_to_screen": return short ? "move window" : spec.dir === "next" ? "Move window to next screen" : `Move window ${DIRS[spec.dir] || spec.dir}`;
+    case "window_to_screen": {
+      const where = { left: "left", right: "right", up: "top", down: "bottom" }[spec.dir];
+      return spec.dir === "next" ? (short ? "window to next screen" : "Move window to the next screen")
+        : short ? `window to ${where} screen` : `Move window to the ${where} screen`;
+    }
     case "keys": return prettyChord(spec.keys) || "Shortcut";
     case "text": return `Type \u201C${(spec.text || "").slice(0, 18)}${(spec.text || "").length > 18 ? "\u2026" : ""}\u201D`;
     case "run": return "Open " + ((spec.run || "").split(/[\\/]/).pop() || "app");
@@ -345,7 +349,7 @@ function remoteSvg(remote, tpl, profile) {
     if (k >= 3) group = {
       ids: digits.slice(0, k).map((b) => b.id), range: `1–${k}`,
       text: `${run.spots ? "Jump to input spot" : "Jump to tab"} 1–${k}`,
-      holdText: run.save ? `Save the box as spot 1–${k}` : "",
+      holdText: run.save ? `Replace spot 1–${k} with this box` : "",
     };
   }
 
@@ -715,7 +719,7 @@ function renderInspector() {
       const at = rows.findIndex(([id]) => inRun(id));
       rows = rows.filter(([id]) => !inRun(id));
       rows.splice(at, 0, ["num_1", { action: "passthrough", label: `${run.spots ? "Jump to input spot" : "Jump to tab"} 1–${k}`, rowLabel: `1 – ${k}`,
-        hold: run.save ? { action: "spot_capture", label: `Save the box as spot 1–${k}` } : undefined }]);
+        hold: run.save ? { action: "spot_capture", label: `Replace spot 1–${k} with this box` } : undefined }]);
     }
     const vmap = variantsOf(prof);
     el.innerHTML = `
@@ -822,7 +826,7 @@ function paramEditor(slot, spec) {
     case "slot": {
       // Which spot the box you're in becomes: a new one at the end, or a numbered one (replaced if it exists).
       const spots = S.state.spots;
-      const opts = [`<option value="">A new spot at the end</option>`].concat([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) =>
+      const opts = [`<option value="">The next free number (${spots.length + 1})</option>`].concat([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) =>
         `<option value="${n}"${(spec.spot | 0) === n ? " selected" : ""}>Spot ${n}${spots[n - 1] ? ` — replaces ${esc(spots[n - 1].label)}` : ""}</option>`));
       return `<div class="param"><label>Save as</label><select class="field" data-param="${slot}:spot">${opts.join("")}</select></div>`;
     }
@@ -1174,15 +1178,23 @@ $("#viewProfiles").addEventListener("change", async (e) => {
 let openAdvanced = new Set();
 function renderSpots() {
   const st = S.state;
+  // One line per job, worded like the remote drawing: a run of numbers reads "1-9", not nine rows.
   const bindings = [];
   for (const r of st.remotes) {
     const p = profileById(r.baseProfile);
     if (!p) continue;
+    const run = digitRun((id) => p.buttons[id]);
+    const k = run.spots ? run.k : 0;
+    const inRun = (id) => k >= 2 && new RegExp(`^num_[1-${k}]$`).test(id);
+    const line = (how, keyName, text) => bindings.push(`<div><b>${esc(r.name)} · ${how}${esc(keyName)}</b> → ${esc(text)}</div>`);
+    if (k >= 2) {
+      line("", `1–${k}`, `Jump to spot 1–${k}`);
+      if (run.save) line("hold ", `1–${k}`, `Replace spot 1–${k} with this box`);
+    }
     for (const [id, spec] of Object.entries(p.buttons)) {
-      if (!r.buttons.some((b) => b.id === id)) continue;
-      for (const [how, s] of [["", spec], ["hold ", spec.hold], ["2\u00D7 ", spec.double]]) {
-        if (s && /^spot_/.test(s.action) && !(s.action === "spot_goto" && s.spot > 1)) bindings.push(`<div><b>${esc(r.name)} \u00B7 ${how}${esc(buttonLabel(id, r.id))}</b> \u2192 ${esc(s.action === "spot_goto" ? "spot 1\u20139 (by number)" : actionName(s))}</div>`);
-      }
+      if (!r.buttons.some((b) => b.id === id) || inRun(id)) continue;
+      for (const [how, sp] of [["", spec], ["hold ", spec.hold], ["2× ", spec.double]])
+        if (sp && /^spot_/.test(sp.action)) line(how, buttonLabel(id, r.id), cap1(actionName(sp, true)));
     }
   }
   $("#viewSpots").innerHTML = `
@@ -1223,7 +1235,7 @@ function renderSpots() {
         <div class="eyebrow">Add a spot</div>
         <h3 style="margin-top:8px">Capture an input box</h3>
         <ol>
-          <li><b>From the remote:</b> click into the input and <b>hold Menu</b>.</li>
+          <li><b>From the remote:</b> click into the input and <b>hold 0</b> (AI dictation workflow). It becomes the next free number; holding a number replaces that spot.</li>
           <li><b>From the keyboard:</b> click into it and press <span class="keycap">Ctrl</span><span class="plus">+</span><span class="keycap">Alt</span><span class="plus">+</span><span class="keycap">Shift</span><span class="plus">+</span><span class="keycap">F9</span>.</li>
           <li><b>From here:</b> press Capture, then click into the input within 4 seconds.</li>
         </ol>

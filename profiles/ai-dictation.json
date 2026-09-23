@@ -1,6 +1,6 @@
 {
   "name": "AI dictation workflow",
-  "description": "Your main workflow. Hold Home to dictate, tap Voice for hands-free. OK sends (hold: Ctrl+Enter, double-tap: new line). Back cancels (hold: clear the box, double-tap: undo). Right/Left and 1-9 move between input spots (hold a number to save the box you're in as that spot); hold an arrow to go to the screen that way. Pg+/Pg- switch apps (hold: desktops). 0 re-pastes the last transcript (hold: move the window to the next screen). Menu: next profile.",
+  "description": "Your main workflow. Hold Home to dictate, tap Voice for hands-free. OK sends (hold: Ctrl+Enter, double-tap: new line). Back cancels (hold: clear the box, double-tap: undo). Right/Left and 1-9 move between input spots. Hold an arrow to move the window you're in to the screen that way. Pg+/Pg- switch apps (hold: desktops). 0 re-pastes the last transcript; hold 0 to save the box you're in as the next free spot (hold a number to replace that spot instead). Menu: next profile.",
   "buttons": {
     "home": {
       "action": "flow_ptt"
@@ -40,14 +40,14 @@
     "right": {
       "action": "spot_next",
       "hold": {
-        "action": "screen_focus",
+        "action": "window_to_screen",
         "dir": "right"
       }
     },
     "left": {
       "action": "spot_prev",
       "hold": {
-        "action": "screen_focus",
+        "action": "window_to_screen",
         "dir": "left"
       }
     },
@@ -138,8 +138,7 @@
     "num_0": {
       "action": "flow_paste_last",
       "hold": {
-        "action": "window_to_screen",
-        "dir": "next"
+        "action": "spot_capture"
       }
     },
     "del": {
@@ -152,14 +151,14 @@
     "up": {
       "action": "passthrough",
       "hold": {
-        "action": "screen_focus",
+        "action": "window_to_screen",
         "dir": "up"
       }
     },
     "down": {
       "action": "passthrough",
       "hold": {
-        "action": "screen_focus",
+        "action": "window_to_screen",
         "dir": "down"
       }
     }

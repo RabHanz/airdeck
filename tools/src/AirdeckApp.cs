@@ -814,7 +814,7 @@ class Controller : IDisposable
     void StepSpot(int delta)
     {
         int n = SpotList.Count;
-        if (n == 0) { ShowNotice("spot", "No input spots yet", "Click into a text box and press Menu (or Ctrl+Alt+Shift+F9)"); return; }
+        if (n == 0) { ShowNotice("spot", "No input spots yet", "Click into a text box and hold 0 (or press Ctrl+Alt+Shift+F9)"); return; }
         var fg = Spots.Foreground;
         int cur = lastSpot >= 0 && lastSpot < n && Spots.Matches(SpotList[lastSpot], fg) ? lastSpot : SpotList.FindIndex(s => Spots.Matches(s, fg));
         JumpSpot(cur < 0 ? (delta > 0 ? 0 : n - 1) : ((cur + delta) % n + n) % n);
@@ -824,7 +824,7 @@ class Controller : IDisposable
     {
         if (index < 0 || index >= SpotList.Count)
         {
-            ShowNotice("spot", "No spot " + (index + 1), SpotList.Count == 0 ? "Save one with Menu or Ctrl+Alt+Shift+F9" : "You have " + SpotList.Count + " input spot" + (SpotList.Count == 1 ? "" : "s"));
+            ShowNotice("spot", "No spot " + (index + 1), SpotList.Count == 0 ? "Save one by holding 0 or with Ctrl+Alt+Shift+F9" : "You have " + SpotList.Count + " input spot" + (SpotList.Count == 1 ? "" : "s") + "; hold 0 to add the next");
             return;
         }
         if (Interlocked.CompareExchange(ref jumping, 1, 0) != 0) return;
