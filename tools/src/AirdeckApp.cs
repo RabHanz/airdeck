@@ -202,16 +202,75 @@ class Controller : IDisposable
     public string ProfilesDir { get { return Path.Combine(Root, "profiles"); } }
     public bool InterceptionActive { get { return interception != null && interception.Active; } }
     // Registered as a keyboard-class filter (the driver file can linger after an uninstall until reboot).
-    public bool InterceptionInstalled
+    public bool InterceptionInstalled { get { return DriverScope.ServiceInstalled; } }
+
+    // The keyboards the driver serves (remotes + ones the user added) and the others that could be
+    // added, for Settings. Instance ids are grouped by "HID\VID_x&PID_y&MI_z\" prefix.
+    List<object> DriverDevicesJson()
     {
-        get
+        var list = new List<object>();
+        if (!DriverScope.ServiceInstalled) return list;
+        var remotes = DriverScope.RemotePrefixes(Root);
+        var extras = DriverScope.ExtraPrefixes(Root);
+        var devs = DriverScope.Devices(DriverScope.KeyboardClass);
+        Func<string, string> prefixOf = id => id.Substring(0, id.LastIndexOf('\\') + 1).ToUpperInvariant();
+        foreach (var prefix in remotes.Concat(extras).Distinct())
         {
-            using (var k = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Class\{4d36e96b-e325-11ce-bfc1-08002be10318}"))
+            var mine = devs.Where(d => d.Id.ToUpperInvariant().StartsWith(prefix)).ToList();
+            var remote = Remotes.FirstOrDefault(r => prefix.Contains(r.HardwareTag.ToUpperInvariant()));
+            list.Add(new Dictionary<string, object>
             {
-                var filters = k == null ? null : k.GetValue("UpperFilters") as string[];
-                return filters != null && filters.Any(f => f.Equals("keyboard", StringComparison.OrdinalIgnoreCase));
-            }
+                { "prefix", prefix }, { "name", remote != null ? remote.Name : KeyboardName(prefix) }, { "remote", remote != null },
+                { "present", mine.Any(d => d.Present) },
+                { "filtered", mine.Any(d => d.Present) ? mine.Where(d => d.Present).All(d => d.Filters.Contains(DriverScope.KeyboardFilter, StringComparer.OrdinalIgnoreCase)) : mine.Any(d => d.Filters.Contains(DriverScope.KeyboardFilter, StringComparer.OrdinalIgnoreCase)) },
+            });
         }
+        foreach (var prefix in devs.Where(d => d.Present && d.Id.IndexOf("VID_", StringComparison.OrdinalIgnoreCase) >= 0).Select(d => prefixOf(d.Id)).Distinct())
+            if (!remotes.Contains(prefix) && !extras.Contains(prefix))
+                list.Add(new Dictionary<string, object> { { "prefix", prefix }, { "name", KeyboardName(prefix) }, { "candidate", true }, { "present", true } });
+        return list;
+    }
+
+    static string KeyboardName(string prefix)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(prefix, @"VID_(\w{4})&PID_(\w{4})(?:&(MI_\w+))?");
+        return m.Success ? "Keyboard " + m.Groups[1].Value + ":" + m.Groups[2].Value + (m.Groups[3].Success ? " · " + m.Groups[3].Value.Replace("&", " ") : "") : prefix;
+    }
+
+    void SaveExtraDevices(List<string> prefixes)
+    {
+        WriteData("driver-devices.json", new Dictionary<string, object> { { "devices", prefixes.Select(p => (object)p).ToList() } });
+    }
+
+    // Runs airdeck-driver.exe with administrator rights (Windows asks the user first) and reports
+    // what it did. mode: "remotes-only" (only the devices Airdeck maps) or "class-wide".
+    public void RunDriverSetup(string mode, bool restartDevices)
+    {
+        string exe = Path.Combine(Root, "airdeck-driver.exe");
+        Task.Run(() =>
+        {
+            string result;
+            try
+            {
+                var p = Process.Start(new ProcessStartInfo(exe, mode + (restartDevices ? " --restart-remotes" : "")) { UseShellExecute = true, Verb = "runas", WindowStyle = ProcessWindowStyle.Hidden });
+                p.WaitForExit();
+                result = p.ExitCode == 0 ? "done" : "failed (see logs\\driver-setup.log)";
+            }
+            catch (Exception ex)
+            {
+                var w = ex as System.ComponentModel.Win32Exception;
+                result = w != null && w.NativeErrorCode == 1223 ? "cancelled" : "failed: " + ex.Message; // 1223: approval declined
+            }
+            Log.Write("driver setup {0}: {1}", mode, result);
+            Ui.Post(_ =>
+            {
+                strandedKey = null; // re-evaluate from scratch
+                OnDeviceChange();
+                CheckKeyboardSlots();
+                ShowNotice("driver", result == "done" ? "Keyboard-key driver updated" : "Driver setup " + result,
+                    result == "done" && mode == "remotes-only" ? "It now only serves the devices Airdeck maps" : "");
+            }, null);
+        });
     }
 
     void Raise(string toast)
@@ -472,6 +531,12 @@ class Controller : IDisposable
         ready.WaitOne();
         RefreshConnected();
         Task.Delay(1500).ContinueWith(_ => SelfTest());
+        Task.Delay(6000).ContinueWith(_ => Ui.Post(__ => CheckKeyboardSlots(), null));
+        // Waking from sleep or hibernation can re-create USB keyboards: re-check the driver's slots.
+        Microsoft.Win32.SystemEvents.PowerModeChanged += (s, e) =>
+        {
+            if (e.Mode == Microsoft.Win32.PowerModes.Resume) Task.Delay(8000).ContinueWith(_ => Ui.Post(__ => OnDeviceChange(), null));
+        };
 
         interception = new InterceptionBridge(
             id => Remotes.Any(r => id.IndexOf(r.HardwareTag, StringComparison.OrdinalIgnoreCase) >= 0),
@@ -591,6 +656,57 @@ class Controller : IDisposable
 
     readonly HashSet<string> uncoveredWarned = new HashSet<string>();
 
+    // Keyboards Windows has but the keyboard-key driver doesn't properly serve. The driver only
+    // handles keyboards that were there when Windows started; one Windows re-creates later (waking
+    // from hibernation, re-plugging a receiver) gets a slot without an id, or none once all 10
+    // are held, and its keys don't reach Windows until the next restart.
+    public List<string> StrandedKeyboards = new List<string>();
+    string strandedKey = "";
+
+    static string KeyboardKey(string id)
+    {
+        // "HID\VID_320F&PID_50C3&MI_01&COL01\A&2372..." or "HID\VID_320F&PID_50C3&REV_0100&MI_01&Col01"
+        //   -> "VID_320F&PID_50C3&MI_01&COL01"
+        var parts = id.Split('\\');
+        string s = parts.Length > 1 ? parts[1] : parts[0];
+        return System.Text.RegularExpressions.Regex.Replace(s, "&REV_[0-9A-Fa-f]+", "").ToUpperInvariant();
+    }
+
+    void CheckKeyboardSlots()
+    {
+        var stranded = new List<string>();
+        // Only when the driver sits on every keyboard: attached to Airdeck's own devices it can't
+        // take anyone else's keyboard down (those devices get their own warning).
+        if (interception != null && interception.Active && !interception.Learning && DriverScope.ClassWide)
+        {
+            var slots = new HashSet<string>(interception.KeyboardSlotIds().Where(x => x != null).Select(KeyboardKey));
+            try
+            {
+                using (var q = new System.Management.ManagementObjectSearcher("SELECT DeviceID, Name FROM Win32_PnPEntity WHERE PNPClass='Keyboard' AND Present=TRUE"))
+                    foreach (System.Management.ManagementObject o in q.Get())
+                    {
+                        string id = o["DeviceID"] as string ?? "";
+                        if (id.IndexOf("VID_", StringComparison.OrdinalIgnoreCase) < 0) continue; // built-in / virtual keyboards keep their boot slots
+                        if (Remotes.Any(r => id.IndexOf(r.HardwareTag, StringComparison.OrdinalIgnoreCase) >= 0)) continue; // remotes have their own warning
+                        if (!slots.Contains(KeyboardKey(id))) stranded.Add(KeyboardKey(id));
+                    }
+            }
+            catch (Exception ex) { Log.Write("keyboard slot check failed: {0}", ex.Message); return; }
+        }
+        string key = string.Join(";", stranded.OrderBy(x => x));
+        if (key == strandedKey) return;
+        strandedKey = key;
+        StrandedKeyboards = stranded;
+        if (stranded.Count > 0)
+        {
+            Log.Write("keyboard-key driver doesn't serve {0} (re-created after startup) - no input until Windows restarts", string.Join(", ", stranded));
+            ShowNotice("driver", "A keyboard isn't getting input", "It was re-created after startup. Restart Windows to fix it");
+        }
+        Raise(null);
+    }
+
+    System.Windows.Forms.Timer slotCheck;
+
     void OnDeviceChange()
     {
         RefreshConnected();
@@ -600,6 +716,9 @@ class Controller : IDisposable
             if (interception.Active)
             {
                 interception.Rescan();
+                // Devices arrive in bursts (a receiver brings several interfaces): check once they settle.
+                if (slotCheck == null) { slotCheck = new System.Windows.Forms.Timer { Interval = 4000 }; slotCheck.Tick += (s, e) => { slotCheck.Stop(); CheckKeyboardSlots(); }; }
+                slotCheck.Stop(); slotCheck.Start();
                 // Interception only serves devices present at boot: a receiver plugged in later gets no slot.
                 foreach (var r in Remotes.Where(x => x.Connected && !interception.Learning && !interception.Covers(x.HardwareTag)))
                     if (uncoveredWarned.Add(r.Id))
@@ -913,6 +1032,10 @@ class Controller : IDisposable
                     { "filtered", interception != null ? interception.FilteredCount : 0 },
                     { "learning", interception != null && interception.Learning },
                     { "linked", Remotes.Where(r => InterceptionActive && interception.Covers(r.HardwareTag)).Select(r => (object)r.Id).ToList() },
+                    { "stranded", StrandedKeyboards.Select(x => (object)x).ToList() },
+                    { "scope", DriverScope.ServiceInstalled ? (DriverScope.ClassWide ? "all" : "devices") : "none" },
+                    { "devices", DriverDevicesJson() },
+                    { "missing", DriverScope.ServiceInstalled && !DriverScope.ClassWide ? DriverScope.RemotesMissingFilter(Root).Select(x => (object)x).ToList() : new List<object>() },
                 } },
             { "settings", new Dictionary<string, object> { { "startWithWindows", StartWithWindows }, { "elevated", Elevated }, { "root", Root } } },
         };
@@ -1059,6 +1182,26 @@ class Controller : IDisposable
                 if (str("doubleTapMs") != null && int.TryParse(str("doubleTapMs"), out dt)) { GestureAction.DoubleMs = Math.Max(200, Math.Min(800, dt)); SaveState(); }
                 Raise(null);
                 return HttpResult.Json(StateJson());
+
+            case "/api/driver-devices": // add / remove a keyboard the driver serves; Windows asks for approval
+            {
+                var extras = DriverScope.ExtraPrefixes(Root);
+                string add = str("add"), remove = str("remove");
+                if (add != null && !extras.Contains(add.ToUpperInvariant())) extras.Add(add.ToUpperInvariant());
+                if (remove != null) extras.RemoveAll(p => p.Equals(remove, StringComparison.OrdinalIgnoreCase));
+                SaveExtraDevices(extras);
+                RunDriverSetup("remotes-only", true);
+                return HttpResult.Json(StateJson());
+            }
+
+            case "/api/driver-scope": // the user pressed the button; Windows asks for approval
+                RunDriverSetup(str("mode") == "class-wide" ? "class-wide" : "remotes-only", str("restart") == "True");
+                return HttpResult.Json(new Dictionary<string, object> { { "ok", true } });
+
+            case "/api/restart-windows": // the user confirmed in the app
+                Log.Write("restarting Windows at the user's request");
+                Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 3") { UseShellExecute = false, CreateNoWindow = true });
+                return HttpResult.Json(new Dictionary<string, object> { { "ok", true } });
 
             case "/api/restart-admin":
                 Process.Start(new ProcessStartInfo(Application.ExecutablePath, "--wait-for " + Process.GetCurrentProcess().Id) { UseShellExecute = true, Verb = "runas" });

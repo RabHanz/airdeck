@@ -19,6 +19,9 @@ if errorlevel 1 (
 )
 
 "%~dp0..\vendor\Interception\Interception\command line installer\install-interception.exe" /install
+rem Interception's installer puts the filter on every keyboard and mouse. Airdeck only needs the
+rem remotes, and a class-wide filter can leave a keyboard or mouse dead after hibernation or re-plugging.
+"%~dp0..\airdeck-driver.exe" remotes-only
 echo.
 echo Done. Restart Windows to finish (until then the remotes' arrow/number keys may not respond).
 pause

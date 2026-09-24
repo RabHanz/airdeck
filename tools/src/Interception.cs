@@ -153,6 +153,16 @@ class InterceptionBridge : IDisposable
         return false;
     }
 
+    // Hardware id of each keyboard slot (1-10); null for a free slot or one still held by a device
+    // that has gone away (the driver only frees slots when Windows restarts).
+    public List<string> KeyboardSlotIds()
+    {
+        var ids = new List<string>();
+        if (context == IntPtr.Zero) return ids;
+        for (int dev = 1; dev <= 10; dev++) ids.Add(HardwareId(dev));
+        return ids;
+    }
+
     string HardwareId(int device)
     {
         var buf = new byte[1024];

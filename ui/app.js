@@ -547,7 +547,40 @@ function calloutSvg(remote, tpl, it, side, n, W) {
 
 // ------------------------------------------------------------------ rail
 
+// Problems with the keyboard-key driver, above every page (in the layout flow, never on top).
+function renderAlert() {
+  const bar = $("#alertBar"), ic = S.state.interception;
+  const ids = [...new Set((ic.stranded || []).map((k) => (k.match(/VID_(\w{4})&PID_(\w{4})/) || []).slice(1).join(":")))].filter(Boolean);
+  const missing = (ic.devices || []).filter((d) => !d.candidate && d.present && !d.filtered);
+  let html = "", tone = "";
+  if (ic.scope === "all" && ids.length) {
+    tone = "red";
+    html = `<div><b>A keyboard or mouse isn't getting any input</b> (${esc(ids.join(", "))}). The keyboard-key driver is attached to every keyboard and mouse, and it can't serve devices Windows re-creates after startup (waking from hibernation, re-plugging a receiver). <b>Fix it now:</b> the driver will only serve the devices Airdeck maps, and your keyboard and mouse come straight back. Windows asks for approval once.</div>
+      <div class="alert-actions"><button class="btn sm primary" data-driverfix="1">Fix it now</button><button class="btn sm ghost" id="restartWin">Restart Windows…</button></div>`;
+  } else if (ic.scope === "all") {
+    tone = "amber";
+    html = `<div><b>The keyboard-key driver is attached to every keyboard and mouse.</b> After hibernation or re-plugging, that can leave your own keyboard or mouse without input until Windows restarts. Limit it to the devices Airdeck maps (Windows asks for approval once).</div>
+      <div class="alert-actions"><button class="btn sm primary" data-driverfix="1">Limit it</button></div>`;
+  } else if (missing.length) {
+    tone = "amber";
+    html = `<div><b>${esc(missing.map((d) => d.name).join(", "))}: set up for this USB port.</b> Windows sees it as a new device, so the keyboard-key driver isn't attached to it yet. Windows asks for approval once.</div>
+      <div class="alert-actions"><button class="btn sm primary" data-driverfix="restart">Set it up</button></div>`;
+  }
+  bar.hidden = !html;
+  bar.className = "alert-bar " + tone;
+  bar.innerHTML = html;
+}
+
+$("#alertBar").addEventListener("click", async (e) => {
+  try {
+    const fix = e.target.closest("[data-driverfix]");
+    if (fix) { await api("/api/driver-scope", { mode: "remotes-only", restart: fix.dataset.driverfix === "restart" }); toast("Approve the Windows prompt to update the driver"); }
+    if (e.target.closest("#restartWin") && confirm("Restart Windows now? Save your work first.")) { await api("/api/restart-windows", {}); toast("Windows is restarting…"); }
+  } catch (err) { fail(err); }
+});
+
 function renderRail() {
+  renderAlert();
   const st = S.state;
   $("#railRemotes").innerHTML = `<div class="rail-label">Remotes</div>` + st.remotes.map((r) => {
     const base = profileById(r.baseProfile), eff = profileById(r.profile);
@@ -1416,11 +1449,22 @@ function renderSettings() {
         <p>Windows blocks keystrokes from reaching apps that run as administrator (an elevated terminal, for example) unless Airdeck runs as administrator too.</p>
         ${set.elevated ? "" : `<button class="btn" id="elevate"><span class="ic">\uE7EF</span>Restart as administrator</button>`}
       </section>
-      <section class="scard">
-        <h3>Keyboard-key driver ${ic.active && ic.learning ? `<span class="chip red">Restart Windows to finish</span>` : ic.active ? `<span class="chip green">Active \u00B7 ${ic.linked.length ? ic.linked.map((id) => esc(remoteById(id)?.name ?? id)).join(" + ") : "no remote"} filtered</span>` : ic.installed ? `<span class="chip amber">Installed \u2014 restart Windows</span>` : `<span class="chip">Not installed \u00B7 optional</span>`}</h3>
-        <p>Arrows, digits, Pg+/Pg-, DEL and Menu reach Windows as ordinary keyboard keys; the open-source Interception driver lets Airdeck remap them on the remote only. It is loaded at startup, so a receiver plugged in later needs a restart before its keys can be remapped.</p>
-        ${ic.active ? "" : `<ol class="steps"><li>Open the tools folder.</li><li>Right-click <code>install-interception.cmd</code> \u2192 <b>Run as administrator</b>.</li><li>Restart Windows. Undo any time with <code>uninstall-interception.cmd</code>.</li></ol>
-          <button class="btn" data-open="driver"><span class="ic">\uE838</span>Open tools folder</button>`}
+      <section class="scard wide">
+        <h3>Keyboard-key driver ${ic.active && ic.learning ? `<span class="chip red">Restart Windows to finish</span>` : ic.active ? `<span class="chip green">Active</span>` : ic.installed ? `<span class="chip amber">Installed — restart Windows</span>` : `<span class="chip">Not installed · optional</span>`}</h3>
+        <p>Ordinary keyboard keys (a remote's arrows, digits, Pg+/Pg-, DEL, Menu, or any keyboard you map) look the same to Windows whichever keyboard they come from. The open-source Interception driver lets Airdeck take them from one device only. Airdeck attaches it <b>only to the devices it maps</b>, so no other keyboard or mouse ever goes through it.</p>
+        ${ic.installed ? `
+          <div class="dev-list">
+            ${(ic.devices || []).filter((d) => !d.candidate).map((d) => `<div class="dev-row">
+              <div><b>${esc(d.name)}</b><small>${d.present ? (d.filtered ? "served" : "plugged in — needs set-up") : "not plugged in"} · ${esc(d.prefix.replace(/\\$/, ""))}</small></div>
+              ${d.remote ? `<span class="chip">remote</span>` : `<button class="btn sm ghost" data-devremove="${esc(d.prefix)}">Remove</button>`}
+            </div>`).join("") || `<p class="empty-hint">No devices yet.</p>`}
+          </div>
+          ${ic.scope === "all" ? `<p class="insp-note warn">Right now it is attached to every keyboard and mouse. <button class="linkish" data-driverfix="1">Limit it to these devices</button></p>` : ""}
+          <details class="dev-add"><summary>Map another keyboard…</summary>
+            <p>Pick the keyboard, then map its keys with the Button Mapper. Only pick a keyboard you want Airdeck to remap: a device the driver serves may need a Windows restart if it is re-plugged or re-created after hibernation (Airdeck tells you when).</p>
+            <div class="dev-list">${(ic.devices || []).filter((d) => d.candidate).map((d) => `<div class="dev-row"><div><b>${esc(d.name)}</b><small>${esc(d.prefix.replace(/\\$/, ""))}</small></div><button class="btn sm" data-devadd="${esc(d.prefix)}">Add</button></div>`).join("") || `<p class="empty-hint">No other keyboards plugged in.</p>`}</div>
+          </details>` : `<ol class="steps"><li>Open the tools folder.</li><li>Right-click <code>install-interception.cmd</code> → <b>Run as administrator</b>.</li><li>Restart Windows. Undo any time with <code>uninstall-interception.cmd</code>.</li></ol>
+          <button class="btn" data-open="driver"><span class="ic"></span>Open tools folder</button>`}
       </section>
       <section class="scard">
         <h3>Wispr Flow</h3>
@@ -1455,6 +1499,9 @@ $("#viewSettings").addEventListener("click", async (e) => {
     if (e.target.closest("#startup")) { S.state = await api("/api/settings", { startWithWindows: !S.state.settings.startWithWindows }); renderSettings(); toast(S.state.settings.startWithWindows ? "Airdeck will start with Windows" : "Won't start with Windows"); }
     const dt = e.target.closest("#dtap [data-ms]");
     if (dt) { S.state = await api("/api/settings", { doubleTapMs: +dt.dataset.ms }); renderSettings(); toast(`Double-tap window: ${S.state.doubleTapMs} ms`); }
+    const add = e.target.closest("[data-devadd]"), rem = e.target.closest("[data-devremove]"), fix = e.target.closest("[data-driverfix]");
+    if (add || rem) { S.state = await api("/api/driver-devices", add ? { add: add.dataset.devadd } : { remove: rem.dataset.devremove }); renderSettings(); toast("Approve the Windows prompt to update the driver"); }
+    if (fix) { await api("/api/driver-scope", { mode: "remotes-only", restart: false }); toast("Approve the Windows prompt to update the driver"); }
     if (e.target.closest("#elevate")) { await api("/api/restart-admin", {}); toast("Approve the Windows prompt \u2014 Airdeck restarts as administrator"); }
     if (e.target.closest("#reload")) { S.state = await api("/api/reload", {}); renderAll(); }
     if (e.target.closest("#selftest")) { const t = await api("/api/selftest", {}); toast(`${t.hook} \u00B7 driver: ${t.interception} \u00B7 ${t.remotes.join(", ")}`, !/OK/.test(t.hook)); }

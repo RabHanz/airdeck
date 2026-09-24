@@ -30,7 +30,7 @@ Get-Process airdeck, airdeck-mapper -ErrorAction SilentlyContinue | Stop-Process
 
 # 3. Copy program files.
 New-Item -ItemType Directory -Force $Target, (Join-Path $Target 'tools'), (Join-Path $Target 'profiles'), (Join-Path $Target 'data') | Out-Null
-foreach ($f in 'airdeck.exe', 'airdeck-mapper.exe', 'hidtool.exe', 'interception.dll') {
+foreach ($f in 'airdeck.exe', 'airdeck-mapper.exe', 'airdeck-driver.exe', 'hidtool.exe', 'interception.dll') {
     $p = Join-Path $bin $f
     if (Test-Path $p) { Copy-Item $p $Target -Force }
 }

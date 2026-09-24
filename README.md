@@ -76,12 +76,24 @@ Requirements: Windows 10/11 x64. Everything else (.NET Framework 4.8, Edge for t
 
 ### Optional, advanced: remap the remote's keyboard keys
 
-The included profiles need no driver: Home, Voice, Back, OK (G20S), volume and media keys are remapped per remote out of the box, and the remotes' arrows and digits keep working normally. The arrows, digits, Pg+/Pg-, DEL and Menu reach Windows as ordinary keyboard keys, and remapping *only the remote's copy* needs the open-source [Interception](https://github.com/oblitum/Interception) filter driver:
+The included profiles need no driver: Home, Voice, Back, OK (G20S), volume and media keys are remapped per remote out of the box, and the remotes' arrows and digits keep working normally. The arrows, digits, Pg+/Pg-, DEL and Menu reach Windows as ordinary keyboard keys. Remapping *only the remote's copy* needs the open-source [Interception](https://github.com/oblitum/Interception) filter driver:
 
 1. In the install folder, right-click `tools\install-interception.cmd` and choose **Run as administrator**. It downloads Interception v1.0.1 from its official release and checks the file hash.
-2. **Restart Windows.** The driver only works once it has been loaded at boot; until then the remotes' keyboard keys may not respond.
+2. **Restart Windows** once.
 
-Airdeck only filters the remotes' keyboard interfaces, never your real keyboard. Caveat (a driver limitation): a receiver re-plugged after boot loses its keyboard keys until the next restart. Undo with `tools\uninstall-interception.cmd` and re-plug the receivers.
+**Airdeck attaches the driver only to the devices it maps.** Interception's own installer puts it on every keyboard and mouse. That goes wrong because the driver has 10 keyboard and 10 mouse slots and only frees them when Windows restarts. Every time Windows re-creates a device (waking from hibernation, re-plugging a receiver), it takes a new slot. Once they run out, a keyboard or mouse that arrives gets no input at all.
+
+So the install script moves the driver onto the remotes' keyboard interfaces alone. Your own keyboards and mice never go through it, however often you hibernate or re-plug.
+
+- **Other keyboards:** you can let Airdeck map another keyboard in *Settings → Keyboard-key driver → Map another keyboard*. The driver is then attached to that keyboard too.
+- **Older installs:** if the driver is still on every keyboard from an older install, Airdeck shows a banner with a one-click fix. Windows asks for approval once.
+- **A remote in a new USB port:** Windows sees it as a new device, so Airdeck offers to set it up with one approval.
+
+Tools in the install folder:
+- `airdeck-driver.exe status`
+- `airdeck-driver.exe remotes-only` (administrator)
+- `airdeck-driver.exe class-wide` (back to Interception's default; restart after)
+- `tools\uninstall-interception.cmd` removes the driver.
 
 ### Optional: dictating into admin windows
 
