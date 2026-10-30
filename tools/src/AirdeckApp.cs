@@ -366,6 +366,34 @@ class Controller : IDisposable
         catch (Exception ex) { Log.Write("spots.json ignored: {0}", ex.Message); }
     }
 
+    // Fabric module: import the input spots Fabric publishes (the T3/Fabric intent bar), so push-to-talk
+    // text lands in the box that routes it to the focused WorkSession. Spots whose label already exists
+    // are left alone; nothing is removed.
+    public string ImportFabricSpots()
+    {
+        string url = Environment.GetEnvironmentVariable("AIRDECK_FABRIC_URL");
+        if (string.IsNullOrEmpty(url)) url = "http://127.0.0.1:3773";
+        url = url.TrimEnd('/') + "/fabric/airdeck-spots.json";
+        try
+        {
+            string text;
+            using (var web = new System.Net.WebClient()) text = web.DownloadString(url);
+            var d = (Dictionary<string, object>)Json.Read(text);
+            int added = 0;
+            foreach (var o in (object[])d["spots"])
+            {
+                var spot = InputSpot.FromJson((Dictionary<string, object>)o);
+                if (SpotList.Any(x => x.Label == spot.Label)) continue;
+                SpotList.Add(spot);
+                added++;
+            }
+            if (added > 0) SaveSpots();
+            Log.Write("fabric spots: {0} added from {1}", added, url);
+            return added + " Fabric spot" + (added == 1 ? "" : "s") + " added";
+        }
+        catch (Exception ex) { Log.Write("fabric spots failed: {0}", ex.Message); return "Could not read " + url + ": " + ex.Message; }
+    }
+
     void SaveSpots()
     {
         WriteData("spots.json", new Dictionary<string, object> { { "spots", SpotList.Select(s => (object)s.ToJson()).ToList() } });
@@ -1575,6 +1603,7 @@ class TrayApp : ApplicationContext
         {
             ShortcutKeyDisplayString = "Ctrl+Alt+Shift+F9"
         });
+        m.Items.Add(new ToolStripMenuItem("Import Fabric input spots", null, (s, e) => toasts.Show(null, controller.ImportFabricSpots(), "")));
         string mapper = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "airdeck-mapper.exe");
         if (File.Exists(mapper))
             m.Items.Add(new ToolStripMenuItem("Button Mapper (new remotes)", null, (s, e) => Process.Start(mapper)));
